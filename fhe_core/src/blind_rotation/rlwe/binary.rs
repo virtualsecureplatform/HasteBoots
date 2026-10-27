@@ -24,6 +24,11 @@ impl<F: NTTField> BinaryBlindRotationKey<F> {
         Self { key }
     }
 
+    /// Public NTT RGSW samples, in input-mask order.
+    pub fn as_slice(&self) -> &[NTTRGSW<F>] {
+        &self.key
+    }
+
     /// Performs the blind rotation operation.
     pub fn blind_rotate(&self, mut lut: Polynomial<F>, lwe: &LWE<<F as Field>::Value>) -> RLWE<F> {
         let rlwe_dimension = lut.coeff_count();

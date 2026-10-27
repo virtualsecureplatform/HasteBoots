@@ -65,8 +65,13 @@ impl<Q: NTTField> SecretKeyPack<Q> {
 
     /// Creates a new [`SecretKeyPack<Q>`].
     pub fn new(params: Parameters<Q>) -> Self {
-        let mut csrng = Prg::new();
+        Self::with_rng(params, Prg::new())
+    }
 
+    /// Create keys using a caller-supplied cryptographic generator.
+    /// Deterministic seeds are intended for reproducible tests and benchmarks;
+    /// production callers must supply fresh, unpredictable randomness.
+    pub fn with_rng(params: Parameters<Q>, mut csrng: Prg) -> Self {
         let lwe_secret_key = Self::create_lwe_secret_key(&params.lwe_params(), &mut csrng);
 
         let ring_dimension = params.ring_dimension();

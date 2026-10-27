@@ -28,6 +28,16 @@ pub struct KeySwitchingRLWEKey<Q: NTTField> {
 }
 
 impl<Q: NTTField> KeySwitchingRLWEKey<Q> {
+    /// Public NTT gadget ciphertexts, in ring-secret chunk order.
+    pub fn as_slice(&self) -> &[NTTGadgetRLWE<Q>] {
+        &self.key
+    }
+
+    /// Actual output LWE dimension, before power-of-two padding.
+    pub fn lwe_dimension(&self) -> usize {
+        self.lwe_dimension
+    }
+
     /// Returns the number of RLWEs composing the key
     pub fn num_rlwes_in_key(&self) -> usize {
         self.key.len() * self.key[0].basis().decompose_len()

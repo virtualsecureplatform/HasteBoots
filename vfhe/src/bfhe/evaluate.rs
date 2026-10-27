@@ -154,6 +154,23 @@ impl<Q: NTTField> Evaluator<Q> {
         }
     }
 
+    /// Public RLWE key-switching material, including its output LWE dimension.
+    pub fn rlwe_key_switching_key(&self) -> Option<&KeySwitchingRLWEKey<Q>> {
+        match &self.ek.key_switching_key {
+            KeySwitchingKeyEnum::RLWE(key) => Some(key),
+            _ => None,
+        }
+    }
+
+    /// Public binary bootstrapping key in input-mask order, without trace data.
+    /// Ternary bootstrapping keys use a different layout and return None.
+    pub fn binary_bootstrap_key(&self) -> Option<&[lattice::NTTRGSW<Q>]> {
+        match &self.ek.blind_rotation_key {
+            RLWEBlindRotationKey::Binary(key) => Some(key.as_slice()),
+            RLWEBlindRotationKey::Ternary(_) => None,
+        }
+    }
+
     /// Returns a reference to the parameters of this [`Evaluator<F>`].
     #[inline]
     pub fn parameters(&self) -> &Parameters<Q> {
