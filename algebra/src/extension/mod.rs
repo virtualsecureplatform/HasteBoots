@@ -132,6 +132,27 @@ pub trait BinomiallyExtendable<const D: usize>: Field {
     fn ext_generator() -> [Self; D];
 }
 
+/// Arithmetic parameters for a binomial extension F[X]/(X^D-W).
+/// Implementors must provide an irreducible polynomial, D>0 dividing |F|-1,
+/// and W^((|F|-1)/D) for the coefficient-wise Frobenius implementation.
+/// This capability does not require a primitive multiplicative generator.
+/// Existing BinomiallyExtendable implementations retain compatibility through
+/// the blanket implementation below.
+pub trait BinomialExtensionParameters<const D: usize>: Field {
+    /// Constant W in the defining polynomial X^D-W.
+    fn binomial_w() -> Self;
+    /// W^((|F|-1)/D), used to apply the base-field Frobenius.
+    fn binomial_dth_root() -> Self;
+}
+impl<F: BinomiallyExtendable<D>, const D: usize> BinomialExtensionParameters<D> for F {
+    fn binomial_w() -> Self {
+        <Self as BinomiallyExtendable<D>>::w()
+    }
+    fn binomial_dth_root() -> Self {
+        <Self as BinomiallyExtendable<D>>::dth_root()
+    }
+}
+
 ///  Has Frobenius trait
 pub trait HasFrobenius<F: Field + Packable>: ExtensionField<F> {
     /// frobenius

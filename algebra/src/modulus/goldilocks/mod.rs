@@ -43,6 +43,7 @@ pub fn to_canonical_u64(value: u64) -> u64 {
 /// The following code has been adapted from winterfell/math/src/field/f64/mod.rs
 /// located at <https://github.com/facebook/winterfell>.
 fn try_inverse(value: u64) -> Option<u64> {
+    let value = to_canonical_u64(value);
     if value == 0 {
         return None;
     }
@@ -262,6 +263,49 @@ mod tests {
         });
         let ans = u64::dot_product_reduce(a, b, GoldilocksModulus);
         assert_eq!(to_canonical_u64(ans), result);
+    }
+
+    #[test]
+    fn lazy_representatives_support_reduce_negate_power_and_inverse() {
+        for value in [0, 1, P - 1, P, P + 1, u64::MAX] {
+            let canonical = to_canonical_u64(value);
+            assert_eq!(value.reduce(GoldilocksModulus), canonical);
+            let mut reduced = value;
+            reduced.reduce_assign(GoldilocksModulus);
+            assert_eq!(reduced, canonical);
+            assert_eq!(
+                value.neg_reduce(GoldilocksModulus),
+                if canonical == 0 { 0 } else { P - canonical }
+            );
+            for exponent in [0u64, 1, 2, 3, 8, 63] {
+                assert_eq!(
+                    to_canonical_u64(value.pow_reduce(exponent, GoldilocksModulus)),
+                    to_canonical_u64(pow(canonical, exponent))
+                );
+            }
+            if canonical == 0 {
+                assert!(value.try_inv_reduce(GoldilocksModulus).is_err());
+            } else {
+                assert_eq!(
+                    to_canonical_u64(
+                        value.mul_reduce(value.inv_reduce(GoldilocksModulus), GoldilocksModulus)
+                    ),
+                    1
+                );
+            }
+        }
+        // Small signed denominators occur in packed Lagrange interpolation;
+        // their inversion chains can themselves produce lazy intermediates.
+        for value in 1..=1024u64 {
+            for value in [value, P - value] {
+                assert_eq!(
+                    to_canonical_u64(
+                        value.mul_reduce(value.inv_reduce(GoldilocksModulus), GoldilocksModulus)
+                    ),
+                    1
+                );
+            }
+        }
     }
 
     fn pow(value: u64, mut exp: u64) -> u64 {

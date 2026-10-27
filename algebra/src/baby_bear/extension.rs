@@ -52,3 +52,40 @@ impl HasTwoAdicBionmialExtension<4> for BabyBear {
 
 /// Extension of BabyBear field
 pub type BabyBearExetension = BinomialExtensionField<BabyBear, 4>;
+
+// Each defining polynomial is checked by an independent Rabin test in
+// tests/extension_parameters.rs. No primitive-generator capability is claimed.
+impl crate::BinomialExtensionParameters<5> for BabyBear {
+    fn binomial_w() -> Self {
+        Self::new(2)
+    }
+    fn binomial_dth_root() -> Self {
+        Self::new(815036133)
+    }
+}
+/// Degree-5 polynomial-basis extension defined by X^5-2.
+/// Field size alone is not a composed proof security certificate.
+pub type BabyBearExtension5 = BinomialExtensionField<BabyBear, 5>;
+impl crate::BinomialExtensionParameters<8> for BabyBear {
+    fn binomial_w() -> Self {
+        Self::new(11)
+    }
+    fn binomial_dth_root() -> Self {
+        Self::new(420899707)
+    }
+}
+/// Degree-8 polynomial-basis extension defined by X^8-11.
+/// Field size alone is not a composed proof security certificate.
+pub type BabyBearExtension8 = BinomialExtensionField<BabyBear, 8>;
+
+impl crate::BinomialExtensionParameters<6> for BabyBear {
+    fn binomial_w() -> Self {
+        Self::new(31)
+    }
+    fn binomial_dth_root() -> Self {
+        Self::new(1314723124)
+    }
+}
+/// Degree-6 polynomial-basis extension defined by X^6-31.
+/// No primitive-generator capability or composed security level is asserted.
+pub type BabyBearExtension6 = BinomialExtensionField<BabyBear, 6>;

@@ -17,16 +17,20 @@ mod primitive;
 mod random;
 
 pub mod derive;
+pub mod matrix_weighted;
 pub mod modulus;
 pub mod reduce;
 pub mod transformation;
 pub mod utils;
 
 #[cfg(feature = "concrete-ntt")]
-pub use baby_bear::{BabyBear, BabyBearExetension};
+pub use baby_bear::{BabyBear, BabyBearExetension, BabyBearExtension5, BabyBearExtension6, BabyBearExtension8};
 
 #[cfg(feature = "concrete-ntt")]
-pub use goldilocks::{Goldilocks, GoldilocksExtension};
+pub use goldilocks::{
+    Goldilocks, GoldilocksExtension, GoldilocksExtension3, GoldilocksExtension4,
+    GoldilocksExtension5,
+};
 
 pub use decompose_basis::Basis;
 pub use error::AlgebraError;
@@ -47,3 +51,6 @@ pub use random::{
     FieldBinarySampler, FieldDiscreteGaussianSampler, FieldTernarySampler, FieldUniformSampler,
 };
 pub use reduce::ModulusConfig;
+
+/// Exact integer rounding for modulus switching.
+pub mod modulus_switching;

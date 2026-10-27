@@ -1,7 +1,9 @@
 mod extension;
 mod goldilocks_ntt;
 
-pub use extension::GoldilocksExtension;
+pub use extension::{
+    GoldilocksExtension, GoldilocksExtension3, GoldilocksExtension4, GoldilocksExtension5,
+};
 use serde::{Deserialize, Serialize};
 
 use std::{

@@ -1,7 +1,7 @@
 mod babybear_ntt;
 mod extension;
 
-pub use extension::BabyBearExetension;
+pub use extension::{BabyBearExetension, BabyBearExtension5, BabyBearExtension6, BabyBearExtension8};
 
 use serde::{Deserialize, Serialize};
 
@@ -22,8 +22,35 @@ use crate::{
 };
 
 /// Implementation of BabyBear field.
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Hash)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, Serialize, Hash)]
 pub struct BabyBear(u32);
+
+// Preserve the existing newtype/Montgomery wire format while enforcing the
+// representation invariant required by arithmetic and derived field equality.
+impl<'de> Deserialize<'de> for BabyBear {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Canonical;
+        impl<'de> serde::de::Visitor<'de> for Canonical {
+            type Value = BabyBear;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a canonical BabyBear Montgomery representative")
+            }
+            fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+                self,
+                deserializer: D,
+            ) -> Result<Self::Value, D::Error> {
+                let value = u32::deserialize(deserializer)?;
+                if value >= modulus::BABY_BEAR_P {
+                    return Err(serde::de::Error::custom(
+                        "BabyBear representative is outside the field",
+                    ));
+                }
+                Ok(BabyBear(value))
+            }
+        }
+        deserializer.deserialize_newtype_struct("BabyBear", Canonical)
+    }
+}
 
 impl Field for BabyBear {
     type Value = u32;

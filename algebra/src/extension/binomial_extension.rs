@@ -20,7 +20,7 @@ use crate::{
     HasTwoAdicBionmialExtension, PackedField, TwoAdicField, field_to_array, powers,
 };
 
-use super::{BinomiallyExtendable, Packable};
+use super::{BinomialExtensionParameters, Packable};
 
 /// Binomial extension field
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Debug)]
@@ -46,15 +46,15 @@ impl<F: Field, const D: usize> From<F> for BinomialExtensionField<F, D> {
     }
 }
 
-impl<F: BinomiallyExtendable<D>, const D: usize> Packable for BinomialExtensionField<F, D> {}
+impl<F: BinomialExtensionParameters<D>, const D: usize> Packable for BinomialExtensionField<F, D> {}
 
-impl<F: BinomiallyExtendable<D> + PackedField<Scalar = F> + Packable, const D: usize>
+impl<F: BinomialExtensionParameters<D> + PackedField<Scalar = F> + Packable, const D: usize>
     ExtensionField<F> for BinomialExtensionField<F, D>
 {
     type ExtensionPacking = BinomialExtensionField<F, D>;
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> HasFrobenius<F>
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> HasFrobenius<F>
     for BinomialExtensionField<F, D>
 {
     /// FrobeniusField automorphisms: x -> x^n, where n is the order of BaseField.
@@ -77,9 +77,9 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> HasFrobenius
         let arr: &[F] = self.as_base_slice();
 
         // z0 = DTH_ROOT^count = W^(k * count) where k = floor((n-1)/D)
-        let mut z0 = F::dth_root();
+        let mut z0 = F::binomial_dth_root();
         for _ in 1..count {
-            z0 *= F::dth_root();
+            z0 *= F::binomial_dth_root();
         }
 
         let mut res = [F::zero(); D];
@@ -107,7 +107,7 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> HasFrobenius
         for i in 1..D {
             g += a[i] * b[D - i];
         }
-        g *= F::w();
+        g *= F::binomial_w();
         g += a[0] * b[0];
         debug_assert_eq!(Self::from(g), *self * f);
 
@@ -115,7 +115,7 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> HasFrobenius
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> AbstractExtensionField<F>
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> AbstractExtensionField<F>
     for BinomialExtensionField<F, D>
 {
     const D: usize = D;
@@ -147,7 +147,7 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> AbstractExte
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Field
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> Field
     for BinomialExtensionField<F, D>
 {
     type Value = F::Value;
@@ -180,7 +180,7 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Field
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Display
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> Display
     for BinomialExtensionField<F, D>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -205,7 +205,9 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Display
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> Neg for BinomialExtensionField<F, D> {
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> Neg
+    for BinomialExtensionField<F, D>
+{
     type Output = Self;
     #[inline]
     fn neg(self) -> Self::Output {
@@ -215,7 +217,9 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> Neg for BinomialExtensi
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> Add for BinomialExtensionField<F, D> {
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> Add
+    for BinomialExtensionField<F, D>
+{
     type Output = Self;
     #[inline]
     fn add(self, rhs: Self) -> Self::Output {
@@ -227,7 +231,9 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> Add for BinomialExtensi
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> Add<F> for BinomialExtensionField<F, D> {
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> Add<F>
+    for BinomialExtensionField<F, D>
+{
     type Output = Self;
     #[inline]
     fn add(self, rhs: F) -> Self::Output {
@@ -237,7 +243,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> Add<F> for BinomialExte
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> AddAssign
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> AddAssign
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -246,7 +252,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> AddAssign
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> Add<&Self>
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> Add<&Self>
     for BinomialExtensionField<F, D>
 {
     type Output = Self;
@@ -256,7 +262,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> Add<&Self>
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> AddAssign<&Self>
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> AddAssign<&Self>
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -265,7 +271,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> AddAssign<&Self>
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> AddAssign<F>
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> AddAssign<F>
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -274,7 +280,9 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> AddAssign<F>
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> Sub for BinomialExtensionField<F, D> {
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> Sub
+    for BinomialExtensionField<F, D>
+{
     type Output = Self;
 
     #[inline]
@@ -287,7 +295,9 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> Sub for BinomialExtensi
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> Sub<F> for BinomialExtensionField<F, D> {
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> Sub<F>
+    for BinomialExtensionField<F, D>
+{
     type Output = Self;
 
     #[inline]
@@ -298,7 +308,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> Sub<F> for BinomialExte
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> Sub<&Self>
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> Sub<&Self>
     for BinomialExtensionField<F, D>
 {
     type Output = Self;
@@ -309,7 +319,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> Sub<&Self>
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> SubAssign<&Self>
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> SubAssign<&Self>
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -318,7 +328,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> SubAssign<&Self>
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> SubAssign
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> SubAssign
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -327,7 +337,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> SubAssign
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> SubAssign<F>
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> SubAssign<F>
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -336,14 +346,16 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> SubAssign<F>
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> Mul for BinomialExtensionField<F, D> {
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> Mul
+    for BinomialExtensionField<F, D>
+{
     type Output = Self;
 
     #[inline]
     fn mul(self, rhs: Self) -> Self::Output {
         let a = self.value;
         let b = rhs.value;
-        let w = F::w();
+        let w = F::binomial_w();
         let w_af = w;
 
         match D {
@@ -356,6 +368,11 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> Mul for BinomialExtensi
             3 => Self {
                 value: cubic_mul(&a, &b, w).to_vec().try_into().unwrap(),
             },
+            6 => {
+                let mut res = Self::default();
+                res.value[..6].copy_from_slice(&sextic_mul(&a, &b, w));
+                res
+            }
             _ => {
                 let mut res = Self::default();
                 #[allow(clippy::needless_range_loop)]
@@ -374,7 +391,9 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> Mul for BinomialExtensi
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> Mul<F> for BinomialExtensionField<F, D> {
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> Mul<F>
+    for BinomialExtensionField<F, D>
+{
     type Output = Self;
 
     #[inline]
@@ -385,7 +404,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> Mul<F> for BinomialExte
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> Mul<&Self>
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> Mul<&Self>
     for BinomialExtensionField<F, D>
 {
     type Output = Self;
@@ -396,7 +415,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> Mul<&Self>
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> MulAssign<&Self>
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> MulAssign<&Self>
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -405,7 +424,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> MulAssign<&Self>
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> MulAssign
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> MulAssign
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -414,7 +433,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> MulAssign
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> MulAssign<F>
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> MulAssign<F>
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -423,7 +442,7 @@ impl<F: Field + BinomiallyExtendable<D>, const D: usize> MulAssign<F>
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Div
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> Div
     for BinomialExtensionField<F, D>
 {
     type Output = Self;
@@ -435,7 +454,7 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Div
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Div<&Self>
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> Div<&Self>
     for BinomialExtensionField<F, D>
 {
     type Output = Self;
@@ -446,7 +465,7 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Div<&Self>
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> DivAssign
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> DivAssign
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -455,7 +474,7 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> DivAssign
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> DivAssign<&Self>
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> DivAssign<&Self>
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -464,7 +483,7 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> DivAssign<&S
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Inv
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> Inv
     for BinomialExtensionField<F, D>
 {
     type Output = Self;
@@ -474,25 +493,30 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Inv
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> BinomialExtensionField<F, D> {
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize>
+    BinomialExtensionField<F, D>
+{
     #[inline]
     fn try_inverse(&self) -> Option<Self> {
         match D {
             2 => Some(Self {
-                value: qudratic_inv(&self.value, F::w())
+                value: qudratic_inv(&self.value, F::binomial_w())
                     .to_vec()
                     .try_into()
                     .unwrap(),
             }),
             3 => Some(Self {
-                value: cubic_inv(&self.value, F::w()).to_vec().try_into().unwrap(),
+                value: cubic_inv(&self.value, F::binomial_w())
+                    .to_vec()
+                    .try_into()
+                    .unwrap(),
             }),
             _ => Some(self.frobenius_inv()),
         }
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Zero
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> Zero
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -513,19 +537,30 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> Zero
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D>, const D: usize> Pow<u128>
+impl<F: Field + BinomialExtensionParameters<D>, const D: usize> Pow<u128>
     for BinomialExtensionField<F, D>
 {
     type Output = Self;
 
     #[inline]
-    // *****WARNING******
-    // Need to re-implement
-    fn pow(self, _rhs: u128) -> Self::Output {
-        std::unimplemented!()
+    fn pow(self, mut exponent: u128) -> Self::Output {
+        let mut base = self;
+        let mut out = Self {
+            value: field_to_array(F::one()),
+        };
+        while exponent > 0 {
+            if exponent & 1 != 0 {
+                out *= base;
+            }
+            exponent >>= 1;
+            if exponent > 0 {
+                base *= base;
+            }
+        }
+        out
     }
 }
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> One
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> One
     for BinomialExtensionField<F, D>
 {
     #[inline]
@@ -549,7 +584,9 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> One
     }
 }
 
-impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> BinomialExtensionField<F, D> {
+impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize>
+    BinomialExtensionField<F, D>
+{
     /// square
     #[inline(always)]
     pub fn square(&self) -> Self {
@@ -557,13 +594,13 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> BinomialExte
             2 => {
                 let a = self.value;
                 let mut res = Self::default();
-                res.value[0] = a[0] * a[0] + a[1] * a[1] * F::w();
+                res.value[0] = a[0] * a[0] + a[1] * a[1] * F::binomial_w();
                 res.value[1] = (a[0] * a[1]) + (a[0] * a[1]);
 
                 res
             }
             3 => Self {
-                value: cubic_square(&self.value, F::w())
+                value: cubic_square(&self.value, F::binomial_w())
                     .to_vec()
                     .try_into()
                     .unwrap(),
@@ -578,7 +615,7 @@ impl<F: Field + BinomiallyExtendable<D> + Packable, const D: usize> BinomialExte
     }
 }
 
-impl<F: BinomiallyExtendable<D> + Packable, const D: usize>
+impl<F: BinomialExtensionParameters<D> + Packable, const D: usize>
     Distribution<BinomialExtensionField<F, D>> for StandardUniform
 where
     StandardUniform: Distribution<F>,
@@ -682,6 +719,43 @@ fn cubic_inv<F: Field>(a: &[F], w: F) -> [F; 3] {
         scalar * (a0_square - a[1] * a2_w),
         scalar * (a2_w * a[2] - a0_a1),
         scalar * (a1_square - a[0] * a[2]),
+    ]
+}
+
+/// Ordinary quadratic-polynomial product, without binomial reduction.
+/// Three diagonal and three cross products replace nine base multiplications.
+#[inline]
+fn quadratic_product<F: Field>(a: [F; 3], b: [F; 3]) -> [F; 5] {
+    let diagonal = [a[0] * b[0], a[1] * b[1], a[2] * b[2]];
+    [
+        diagonal[0],
+        (a[0] + a[1]) * (b[0] + b[1]) - diagonal[0] - diagonal[1],
+        (a[0] + a[2]) * (b[0] + b[2]) - diagonal[0] - diagonal[2] + diagonal[1],
+        (a[1] + a[2]) * (b[1] + b[2]) - diagonal[1] - diagonal[2],
+        diagonal[2],
+    ]
+}
+
+/// Split A=A0+X^3 A1 and B=B0+X^3 B1, use three quadratic products,
+/// then reduce the five coefficients above degree five by X^6=w.
+/// This needs 18 base products plus five multiplications by w, versus
+/// 36 products plus 15 wraparound multiplications in the generic loop.
+#[inline]
+fn sextic_mul<F: Field>(a: &[F], b: &[F], w: F) -> [F; 6] {
+    let low = quadratic_product([a[0], a[1], a[2]], [b[0], b[1], b[2]]);
+    let high = quadratic_product([a[3], a[4], a[5]], [b[3], b[4], b[5]]);
+    let middle = quadratic_product(
+        [a[0] + a[3], a[1] + a[4], a[2] + a[5]],
+        [b[0] + b[3], b[1] + b[4], b[2] + b[5]],
+    );
+    let cross: [F; 5] = std::array::from_fn(|i| middle[i] - low[i] - high[i]);
+    [
+        low[0] + w * (cross[3] + high[0]),
+        low[1] + w * (cross[4] + high[1]),
+        low[2] + w * high[2],
+        low[3] + cross[0] + w * high[3],
+        low[4] + cross[1] + w * high[4],
+        cross[2],
     ]
 }
 

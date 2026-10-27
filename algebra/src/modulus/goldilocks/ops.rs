@@ -7,14 +7,14 @@ impl Reduce<GoldilocksModulus> for u64 {
 
     #[inline]
     fn reduce(self, _: GoldilocksModulus) -> Self::Output {
-        if self > P { self - P } else { self }
+        if self >= P { self - P } else { self }
     }
 }
 
 impl ReduceAssign<GoldilocksModulus> for u64 {
     #[inline]
     fn reduce_assign(&mut self, _: GoldilocksModulus) {
-        if *self > P {
+        if *self >= P {
             *self -= P;
         }
     }
@@ -67,7 +67,8 @@ impl NegReduce<GoldilocksModulus> for u64 {
 
     #[inline]
     fn neg_reduce(self, _: GoldilocksModulus) -> Self::Output {
-        if self == 0 { 0 } else { P - self }
+        let value = super::to_canonical_u64(self);
+        if value == 0 { 0 } else { P - value }
     }
 }
 
@@ -103,9 +104,9 @@ where
             return 1;
         }
 
-        debug_assert!(self < P);
-
-        let mut power: Self = self;
+        // Addition/multiplication intentionally permit lazy representatives.
+        // Inversion calls this routine on such intermediate values too.
+        let mut power: Self = super::to_canonical_u64(self);
 
         let exp_trailing_zeros = exp.trailing_zeros();
         if exp_trailing_zeros > 0 {
