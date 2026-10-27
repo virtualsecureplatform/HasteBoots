@@ -42,6 +42,7 @@ count_ntt = ["algebra/count_ntt"]
 
 [dev-dependencies]
 criterion = { workspace = true }
+sumcheck = { path = "../sumcheck" }
 
 [[bench]]
 name = "zk_bfhe"

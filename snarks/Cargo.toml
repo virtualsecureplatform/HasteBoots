@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 piop = { path = "../piop" }
 trace = { path = "../trace" }
+lattice = { path = "../lattice" }
 pcs = { path = "../pcs" }
 algebra = { path = "../algebra" }
 helper = { path = "../helper" }

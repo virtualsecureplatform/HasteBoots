@@ -7,20 +7,34 @@ pub mod fhe_batch_op;
 pub mod fhe_op;
 pub mod lookup;
 pub mod ntt;
+/// Accumulator arithmetic, endpoint, continuity and decomposition-root linkage.
+pub mod packed_accumulator;
+/// Trusted public binary bootstrapping-key preprocessing and Hadamard binding.
+pub mod packed_bootstrap_key;
 /// Canonical radix reconstruction and public-table borrow comparison.
 pub mod packed_decomposition;
 /// Extension-field evaluations authenticated against canonical packed roots.
 pub mod packed_extension;
 /// Experimental extension-field tuple lookups over canonical packed roots.
 pub mod packed_extension_lookup;
+/// Original-size RLWE key switching and public LWE extraction linkage.
+pub mod packed_key_switch;
 /// Independent lookup challenges packed into helper lanes with canonical pullbacks.
 pub mod packed_lane_lookup;
 /// Linear identities between canonical packed source tables.
 pub mod packed_linear;
 /// Packed reciprocal lookup against a trusted small public scalar table.
 pub mod packed_lookup;
+/// Expected public monomial products and deterministic input preprocessing.
+pub mod packed_monomial;
+/// Packed NTT checks against canonical coefficient and evaluation commitments.
+pub mod packed_ntt;
 /// Canonical committed-table references shared across packed relations.
 pub mod packed_oracle;
+/// Experimental complete binary NAND PBS statement, proof and verifier API.
+pub mod packed_pbs;
+/// Root declarations in decoded complete packed proofs, for resource audits.
+pub mod packed_root_inventory;
 /// Experimental packed vector relations with authenticated terminal openings.
 pub mod packed_relation;
 /// Repeated tuple lookups authenticating original canonical columns.
