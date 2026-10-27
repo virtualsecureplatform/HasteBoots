@@ -9,6 +9,8 @@ pub mod lookup;
 pub mod ntt;
 /// Accumulator arithmetic, endpoint, continuity and decomposition-root linkage.
 pub mod packed_accumulator;
+/// Experimental ZeroCheck with round-interleaved structured MW-Basefold.
+pub mod packed_basefold;
 /// Trusted public binary bootstrapping-key preprocessing and Hadamard binding.
 pub mod packed_bootstrap_key;
 /// Canonical radix reconstruction and public-table borrow comparison.
@@ -108,3 +110,5 @@ where
     }
 }
 
+/// Experimental ordered matrix queries reduced to a masked scalar PCS opening.
+pub mod packed_scalar_opening;
