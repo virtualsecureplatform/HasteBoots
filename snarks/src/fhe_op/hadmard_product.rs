@@ -183,7 +183,7 @@ where
             pcs_commit_time.elapsed()
         );
         if let Some(stats) = statistics {
-            stats.add_prover_pcs_time(pcs_commit_time.elapsed());
+            stats.add_prover_commit_time(pcs_commit_time.elapsed());
         }
 
         // [PIOP Phase] extract all the Hadamard instances and prove them via one single sumcheck
@@ -283,7 +283,7 @@ where
             pcs_poly_open_time.elapsed()
         );
         if let Some(stats) = statistics {
-            stats.add_prover_pcs_time(pcs_poly_open_time.elapsed());
+            stats.add_prover_open_time(pcs_poly_open_time.elapsed());
         }
 
         HadamardProductProof {

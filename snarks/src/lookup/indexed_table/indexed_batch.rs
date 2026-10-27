@@ -187,7 +187,7 @@ where
             commit_time.elapsed()
         );
         if let Some(stats) = stats {
-            stats.add_prover_pcs_time(commit_time.elapsed());
+            stats.add_prover_commit_time(commit_time.elapsed());
         }
 
         // compute the helper polynomials
@@ -195,10 +195,14 @@ where
         let random_value =
             trans.get_challenge(b"[Challenge] random value used in the rational identity");
         let random_s_hash = trans.get_challenge(b"[Challenge] random value used for hashing.");
+        let extension_time = std::time::Instant::now();
         let trace_ef = trace_mle
             .iter()
             .map(|trace| trace.to_ef())
             .collect::<Vec<_>>();
+        if let Some(stats) = stats {
+            stats.prover_extension_time += extension_time.elapsed();
+        }
         let helper = trace_mle
             .iter()
             .zip(witness.iter())
@@ -223,7 +227,7 @@ where
             commit_time.elapsed()
         );
         if let Some(stats) = stats {
-            stats.add_prover_pcs_time(commit_time.elapsed());
+            stats.add_prover_commit_time(commit_time.elapsed());
         }
 
         // [PIOP Phase] Prove all indexed lookup instance in one sumcheck protocol
@@ -275,7 +279,7 @@ where
             pcs_open_time.elapsed()
         );
         if let Some(stats) = stats {
-            stats.add_prover_pcs_time(pcs_open_time.elapsed());
+            stats.add_prover_open_time(pcs_open_time.elapsed());
         }
 
         // [PCS Phase] Generate evaluation proof for the helper oracles
@@ -293,7 +297,7 @@ where
             pcs_open_time.elapsed()
         );
         if let Some(stats) = stats {
-            stats.add_prover_pcs_time(pcs_open_time.elapsed());
+            stats.add_prover_open_time(pcs_open_time.elapsed());
         }
 
         BatchedIndexedLogUpSnarksProof {

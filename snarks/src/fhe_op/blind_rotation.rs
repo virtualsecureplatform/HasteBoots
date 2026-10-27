@@ -249,12 +249,16 @@ where
             pcs_commit_time.elapsed()
         );
         if let Some(stats) = statistics {
-            stats.add_prover_pcs_time(pcs_commit_time.elapsed());
+            stats.add_prover_commit_time(pcs_commit_time.elapsed());
         }
 
         // [PIOP Phase] extract all the Hadamard instances and prove them via one single sumcheck
         let piop_hadamard_time = std::time::Instant::now();
+        let extension_time = std::time::Instant::now();
         let blind_rotation_trace_ef = blind_rotation_trace_mle.to_ef();
+        if let Some(stats) = statistics {
+            stats.prover_extension_time += extension_time.elapsed();
+        }
 
         // prepare Hadamard instances
         let external_product_hadamard_instance =
@@ -331,7 +335,11 @@ where
             b"[Challenge] random point used to verify evaluations",
             trace_evals.log_num_bit_evals(),
         );
+        let extension_time = std::time::Instant::now();
         let bit_poly = Rc::new(bit_poly.to_ef());
+        if let Some(stats) = statistics {
+            stats.prover_extension_time += extension_time.elapsed();
+        }
         let bit_ntt_evals = trace_evals.pack_bit_ntt_to_vec();
         let eval = compute_oracle_evals(&bit_ntt_evals, &point_bit_oracle);
 
@@ -401,7 +409,7 @@ where
             pcs_poly_open_time.elapsed()
         );
         if let Some(stats) = statistics {
-            stats.add_prover_pcs_time(pcs_poly_open_time.elapsed());
+            stats.add_prover_open_time(pcs_poly_open_time.elapsed());
         }
 
         let pcs_poly_open_time = std::time::Instant::now();
@@ -422,7 +430,7 @@ where
             pcs_poly_open_time.elapsed()
         );
         if let Some(stats) = statistics {
-            stats.add_prover_pcs_time(pcs_poly_open_time.elapsed());
+            stats.add_prover_open_time(pcs_poly_open_time.elapsed());
         }
 
         // [PIOP Phase] Open the sparse coefficient matrix evaluation `ntt_proof.coeff_eval_at_r_v[0]` at point_r_v

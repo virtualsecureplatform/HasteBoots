@@ -150,7 +150,7 @@ where
             commit_time.elapsed()
         );
         if let Some(stats) = statistics {
-            stats.add_prover_pcs_time(commit_time.elapsed());
+            stats.add_prover_commit_time(commit_time.elapsed());
         }
 
         // [PIOP Phase] Prove the decomposition consistency via batched indexed log-up proofs
@@ -207,7 +207,7 @@ where
             pcs_open_time.elapsed()
         );
         if let Some(stats) = statistics {
-            stats.add_prover_pcs_time(pcs_open_time.elapsed());
+            stats.add_prover_open_time(pcs_open_time.elapsed());
         }
 
         let basis = 1 << params.lt_tables.basis_bits;

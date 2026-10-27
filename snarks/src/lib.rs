@@ -13,9 +13,26 @@ pub mod sparse_matrix_eval;
 pub struct SnarkStatistics {
     pub prover_pcs_time: std::time::Duration,
     pub verifier_pcs_time: std::time::Duration,
+    /// Subset of prover PCS time spent committing (including helper oracles).
+    pub prover_commit_time: std::time::Duration,
+    /// Subset of prover PCS time spent opening commitments.
+    pub prover_open_time: std::time::Duration,
+    /// Explicitly tracked trace/bit/helper-input extension conversions.
+    /// This excludes key preprocessing and does not cover every allocation.
+    pub prover_extension_time: std::time::Duration,
 }
 
 impl SnarkStatistics {
+    pub fn add_prover_commit_time(&mut self, dur: std::time::Duration) {
+        self.prover_commit_time += dur;
+        self.add_prover_pcs_time(dur);
+    }
+
+    pub fn add_prover_open_time(&mut self, dur: std::time::Duration) {
+        self.prover_open_time += dur;
+        self.add_prover_pcs_time(dur);
+    }
+
     pub fn add_prover_pcs_time(&mut self, dur: std::time::Duration) {
         self.prover_pcs_time += dur;
     }
@@ -58,3 +75,4 @@ where
         PCS::open(&self.params, comm, state, points, trans)
     }
 }
+
