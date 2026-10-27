@@ -5,7 +5,7 @@ use core::panic;
 use std::vec;
 
 use algebra::Field;
-use algebra::{DenseMultilinearExtension, ListOfProductsOfPolynomials, MultilinearExtension};
+use algebra::{DenseMultilinearExtension, ListOfProductsOfPolynomials};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
@@ -15,7 +15,7 @@ use super::IPForMLSumcheck;
 use super::verifier::VerifierMsg;
 
 /// Prover Message
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProverMsg<F: Field> {
     /// evaluations on P(0), P(1), P(2), ...
     pub(crate) evaluations: Vec<F>,
@@ -97,7 +97,16 @@ impl<F: Field> IPForMLSumcheck<F> {
                 .flattened_ml_extensions
                 .par_iter_mut()
                 .for_each(|mulplicand| {
-                    *mulplicand = mulplicand.fix_variables(&[r]);
+                    // Prover tables are owned here. Fold them in place instead
+                    // of cloning the full table before discarding half of it.
+                    let remaining = mulplicand.evaluations.len() / 2;
+                    for b in 0..remaining {
+                        let left = mulplicand.evaluations[2 * b];
+                        let right = mulplicand.evaluations[2 * b + 1];
+                        mulplicand.evaluations[b] = left + r * (right - left);
+                    }
+                    mulplicand.evaluations.truncate(remaining);
+                    mulplicand.num_vars -= 1;
                 });
         } else if prover_state.round > 0 {
             panic!("Verifier message is empty")
@@ -124,15 +133,26 @@ impl<F: Field> IPForMLSumcheck<F> {
             .zip(prover_state.linear_ops.par_iter())
             .map(|((coefficient, products), linear_ops)| {
                 let mut products_sum = vec![F::zero(); degree + 1];
+                let mut product = vec![F::zero(); degree + 1];
                 for b in 0..1 << (nv - i) {
-                    let mut product = vec![*coefficient; degree + 1];
+                    product.fill(*coefficient);
                     // This loop is evaluating each MLE to update the product via performing the accumulated multiplication.
                     for (&jth_product, &(op_a, op_b)) in products.iter().zip(linear_ops.iter()) {
                         // (a, b) is a wrapped linear operation over original MLE
                         let table = &prover_state.flattened_ml_extensions[jth_product];
-                        let op = table[b << 1] * op_a;
-                        let mut start = op + op_b;
-                        let step = (table[(b << 1) + 1] - table[b << 1]) * op_a;
+                        let left = table[b << 1];
+                        let difference = table[(b << 1) + 1] - left;
+                        // Most factors have the identity affine wrapper. In an
+                        // extension field, multiplying by one still executes a
+                        // full field multiplication unless we specialize it.
+                        let (mut start, step) = if op_a == F::one() {
+                            (left, difference)
+                        } else {
+                            (left * op_a, difference * op_a)
+                        };
+                        if op_b != F::zero() {
+                            start += op_b;
+                        }
                         // Evaluate each point P(t) for t = 0..degree + 1 via the accumulated addition instead of the multiplication by t.
                         // [t|b] = [0|b] + t * ([1|b] - [0|b]) represented by little-endian
                         for p in product.iter_mut() {
@@ -148,7 +168,12 @@ impl<F: Field> IPForMLSumcheck<F> {
             })
             .reduce(
                 || vec![F::zero(); degree + 1],
-                |acc, a| acc.iter().zip(a.iter()).map(|(&acc, &a)| acc + a).collect(),
+                |mut acc, a| {
+                    for (acc, a) in acc.iter_mut().zip(a) {
+                        *acc += a;
+                    }
+                    acc
+                },
             );
         ProverMsg { evaluations: res }
     }
@@ -167,5 +192,84 @@ impl<F: Field> ProverState<F> {
             .par_iter()
             .map(fast_compute)
             .collect::<Vec<_>>()
+    }
+}
+
+#[cfg(test)]
+mod regression {
+    use super::*;
+    use algebra::{BabyBear, BabyBearExetension, Field, Goldilocks, MultilinearExtension};
+    use rand::SeedableRng;
+    use std::rc::Rc;
+
+    // Independent direct interpolation, retaining the allocation-based folding
+    // used by the artifact, checks that the optimized path changes no messages.
+    fn check<F: Field>() {
+        let mut rng = rand_chacha::ChaCha12Rng::seed_from_u64(9321);
+        let mut one = F::zero();
+        let mut values = Vec::new();
+        for _ in 0..32 {
+            values.push(F::random(&mut rng));
+            one += F::one();
+        }
+        let a = Rc::new(DenseMultilinearExtension::from_evaluations_vec(5, values));
+        let mut polynomial = ListOfProductsOfPolynomials::new(5);
+        polynomial.add_product_with_linear_op(
+            [a.clone(), a.clone()],
+            &[(one, F::one()), (F::one(), -one)],
+            one,
+        );
+        polynomial.add_product([a.clone(), a.clone(), a], -F::one());
+        let mut state = IPForMLSumcheck::prover_init(&polynomial);
+        let mut reference = IPForMLSumcheck::prover_init(&polynomial);
+        for round in 0..5 {
+            let r = F::random(&mut rng);
+            let message = if round == 0 {
+                None
+            } else {
+                Some(VerifierMsg { randomness: r })
+            };
+            if round > 0 {
+                for table in &mut reference.flattened_ml_extensions {
+                    *table = table.fix_variables(&[r]);
+                }
+            }
+            let degree = reference.max_multiplicands;
+            let mut expected = vec![F::zero(); degree + 1];
+            for ((coefficient, indices), ops) in
+                reference.list_of_products.iter().zip(&reference.linear_ops)
+            {
+                for b in 0..(1 << (4 - round)) {
+                    let mut node = F::zero();
+                    for expected in &mut expected {
+                        let mut value = *coefficient;
+                        for (&index, &(a, c)) in indices.iter().zip(ops) {
+                            let table = &reference.flattened_ml_extensions[index];
+                            let at = table[2 * b] + node * (table[2 * b + 1] - table[2 * b]);
+                            value *= a * at + c;
+                        }
+                        *expected += value;
+                        node += F::one();
+                    }
+                }
+            }
+            let actual = IPForMLSumcheck::prove_round(&mut state, &message);
+            assert_eq!(actual.evaluations, expected);
+            for (actual, expected) in state
+                .flattened_ml_extensions
+                .iter()
+                .zip(&reference.flattened_ml_extensions)
+            {
+                assert_eq!(actual.evaluations, expected.evaluations);
+                assert_eq!(actual.num_vars, expected.num_vars);
+            }
+        }
+    }
+
+    #[test]
+    fn scalar_optimization_preserves_all_round_messages() {
+        check::<BabyBear>();
+        check::<BabyBearExetension>();
+        check::<Goldilocks>();
     }
 }

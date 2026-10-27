@@ -13,6 +13,8 @@ use std::marker::PhantomData;
 use verifier::SubClaim;
 
 pub mod error;
+pub mod packed;
+pub mod packed_zero;
 pub mod prover;
 pub mod verifier;
 
@@ -115,6 +117,18 @@ impl<F: Field + Serialize> MLSumcheck<F> {
         claimed_sum: F,
         proof: &Proof<F>,
     ) -> Result<SubClaim<F>, crate::error::Error> {
+        if polynomial_info.num_variables == 0
+            || polynomial_info.max_multiplicands == 0
+            || proof.len() != polynomial_info.num_variables
+            || polynomial_info
+                .max_multiplicands
+                .checked_add(1)
+                .is_none_or(|len| proof.iter().any(|m| m.evaluations.len() != len))
+        {
+            return Err(crate::error::Error::Reject(Some(
+                "sumcheck proof dimensions".into(),
+            )));
+        }
         trans.append_message(b"polynomial info", polynomial_info);
         let mut verifier_state = IPForMLSumcheck::verifier_init(polynomial_info);
         for i in 0..polynomial_info.num_variables {
