@@ -1,5 +1,12 @@
 # Artifact for HasteBoots
 
+The performance and packed-protocol experiments are documented in
+[docs/performance.md](docs/performance.md). The original PBS backend remains
+available. The experimental `snarks::packed_pbs` API now composes a complete
+binary NAND PBS relation with public input/output and key binding; it is not
+promoted or covered by a complete 128-bit security argument. See
+[the implementation ledger](docs/implementation-status.md) for remaining work.
+
 This artifact provides experimental data and the source code of the implementation of HasteBoots for reproducing the experimental results reported in the paper. 
 
 The project can run on both macOS, Windows and Linux environment.
@@ -103,4 +110,4 @@ To reproduct the results with Brakedown in **table 4** from the paper, simply ru
 cargo r -r -p vfhe --example zk_nand_batch
 ```
 
-The full experimental statistics are provided in `statistics/HasteBoots_Performance.xlsx` (Table 4). 
+The full experimental statistics are provided in `statistics/HasteBoots_Performance.xlsx` (Table 4).
