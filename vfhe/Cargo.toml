@@ -67,6 +67,22 @@ name = "zk_nand_zama"
 path = "examples/zk_binary_pbs/zk_nand_zama.rs"
 
 [[example]]
+name = "bench_pbs_babybear"
+path = "examples/performance/babybear.rs"
+
+[[example]]
+name = "bench_pbs_goldilocks"
+path = "examples/performance/goldilocks.rs"
+
+[[example]]
+name = "packed_pbs"
+path = "examples/performance/packed_pbs.rs"
+
+[[example]]
+name = "packed_pbs_hadamard"
+path = "examples/performance/packed_pbs_hadamard.rs"
+
+[[example]]
 name = "zk_nand_goldilocks"
 path = "examples/zk_binary_pbs/zk_nand_goldilocks.rs"
 
@@ -111,3 +127,47 @@ path = "examples/zk_nand_op/zk_lookup.rs"
 [[example]]
 name = "zk_decomposition"
 path = "examples/zk_nand_op/zk_decomposition.rs"
+
+[[example]]
+name = "pipfri_pbs_babybear"
+path = "examples/performance/pipfri_babybear.rs"
+
+[[example]]
+name = "pipfri_pbs_goldilocks"
+path = "examples/performance/pipfri_goldilocks.rs"
+
+[[example]]
+name = "packed_extension_pbs_babybear"
+path = "examples/performance/packed_extension_babybear.rs"
+
+[[example]]
+name = "packed_extension_pbs_goldilocks"
+path = "examples/performance/packed_extension_goldilocks.rs"
+
+[[example]]
+name = "mw_basefold_babybear"
+path = "examples/performance/mw_basefold_babybear.rs"
+
+[[example]]
+name = "mw_basefold_goldilocks"
+path = "examples/performance/mw_basefold_goldilocks.rs"
+
+[[example]]
+name = "masked_pipfri_pbs_babybear"
+path = "examples/performance/masked_pipfri_babybear.rs"
+
+[[example]]
+name = "masked_pipfri_pbs_goldilocks"
+path = "examples/performance/masked_pipfri_goldilocks.rs"
+
+[[example]]
+name = "packed_extension_pbs_goldilocks3"
+path = "examples/performance/packed_extension_goldilocks3.rs"
+
+[[example]]
+name = "packed_extension_pbs_babybear8"
+path = "examples/performance/packed_extension_babybear8.rs"
+
+[[example]]
+name = "packed_extension_pbs_babybear6"
+path = "examples/performance/packed_extension_babybear6.rs"
