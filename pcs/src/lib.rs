@@ -7,6 +7,12 @@
 pub mod matrix_weighted;
 /// mulilinear polynomial commitment
 pub mod multilinear;
+/// Experimental streaming structured matrix-weighted Basefold primitive.
+pub mod mw_basefold;
+/// Experimental non-hiding ordinary PipFRI reference PCS.
+pub mod pipfri;
+/// Experimental authenticated rolling-batch FRI primitive for ordinary PipFRI.
+pub mod rolling_fri;
 /// utils, mainly used to implement linear time encodable code now
 pub mod utils;
 
