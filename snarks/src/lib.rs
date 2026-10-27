@@ -7,6 +7,24 @@ pub mod fhe_batch_op;
 pub mod fhe_op;
 pub mod lookup;
 pub mod ntt;
+/// Canonical radix reconstruction and public-table borrow comparison.
+pub mod packed_decomposition;
+/// Extension-field evaluations authenticated against canonical packed roots.
+pub mod packed_extension;
+/// Experimental extension-field tuple lookups over canonical packed roots.
+pub mod packed_extension_lookup;
+/// Independent lookup challenges packed into helper lanes with canonical pullbacks.
+pub mod packed_lane_lookup;
+/// Linear identities between canonical packed source tables.
+pub mod packed_linear;
+/// Packed reciprocal lookup against a trusted small public scalar table.
+pub mod packed_lookup;
+/// Canonical committed-table references shared across packed relations.
+pub mod packed_oracle;
+/// Experimental packed vector relations with authenticated terminal openings.
+pub mod packed_relation;
+/// Repeated tuple lookups authenticating original canonical columns.
+pub mod packed_tuple_lookup;
 pub mod sparse_matrix_eval;
 
 #[derive(Default, Debug)]
