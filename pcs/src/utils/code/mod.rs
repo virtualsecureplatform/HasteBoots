@@ -1,5 +1,8 @@
+mod block;
 mod expander;
 mod reedsolomon;
+
+pub use block::{BlockReedSolomonCode, RowCode, ScalarRowCode};
 
 use algebra::{AbstractExtensionField, Field};
 pub use expander::{ExpanderCode, ExpanderCodeSpec};

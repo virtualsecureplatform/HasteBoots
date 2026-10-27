@@ -3,6 +3,8 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![deny(missing_docs)]
 
+/// Experimental base-field commitments for packed matrix-weighted queries.
+pub mod matrix_weighted;
 /// mulilinear polynomial commitment
 pub mod multilinear;
 /// utils, mainly used to implement linear time encodable code now

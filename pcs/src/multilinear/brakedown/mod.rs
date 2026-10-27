@@ -42,6 +42,60 @@ where
     S: LinearCodeSpec<F, Code = C>,
     EF: AbstractExtensionField<F>;
 
+#[cfg(test)]
+mod regression {
+    use super::*;
+    use crate::utils::code::{ExpanderCode, ExpanderCodeSpec};
+    use algebra::{BabyBear as F, BabyBearExetension as EF};
+    use num_traits::Zero;
+    use sha2::Sha256;
+
+    type Backend = BrakedownPCS<F, Sha256, ExpanderCode<F>, ExpanderCodeSpec, EF>;
+
+    #[test]
+    fn tiled_responses_match_direct_linear_combination() {
+        for variables in [4, 14] {
+            let specification = ExpanderCodeSpec::new(0.1195, 0.0248, 1.9, 31, 10);
+            let pp = Backend::setup(variables, &specification);
+            let rows = pp.num_rows();
+            let cols = pp.code().message_len();
+            let length = pp.code().codeword_len();
+            let matrix: Vec<F> = (0..rows * length).map(|i| F::new(i as u32 + 1)).collect();
+            let extended: Vec<EF> = matrix
+                .iter()
+                .map(|&v| EF::from_base_fn(|j| v + F::new(j as u32)))
+                .collect();
+            let challenges: Vec<EF> = (0..rows)
+                .map(|i| EF::from_base_fn(|j| F::new((i * 7 + j + 1) as u32)))
+                .collect();
+            let mut expected = vec![EF::zero(); cols];
+            let mut expected_ext = vec![EF::zero(); cols];
+            for row in 0..rows {
+                for column in 0..cols {
+                    expected[column] += challenges[row] * matrix[row * length + column];
+                    expected_ext[column] += challenges[row] * extended[row * length + column];
+                }
+            }
+            let state = BrakedownCommitmentState {
+                matrix,
+                merkle_tree: MerkleTree::new(),
+            };
+            let state_ext = BrakedownCommitmentState {
+                matrix: extended,
+                merkle_tree: MerkleTree::new(),
+            };
+            assert_eq!(
+                Backend::answer_challenge(&pp, &challenges, &state),
+                expected
+            );
+            assert_eq!(
+                Backend::answer_challenge_ext(&pp, &challenges, &state_ext),
+                expected_ext
+            );
+        }
+    }
+}
+
 impl<F, H, C, S, EF> BrakedownPCS<F, H, C, S, EF>
 where
     F: Field,
@@ -63,19 +117,20 @@ where
         let num_cols = pp.code().message_len();
         let codeword_len = pp.code().codeword_len();
 
-        // Compute the answer as a linear combination.
+        // Independent output tiles need no per-row temporary vectors and can
+        // run in parallel. Keep each accumulation tile small enough for cache.
         let mut answer = vec![EF::zero(); num_cols];
-        state
-            .matrix
-            .chunks_exact(codeword_len)
-            .zip(challenge)
-            .for_each(|(row, coeff)| {
-                row.iter()
-                    .take(num_cols)
-                    .enumerate()
-                    .for_each(|(idx, item)| {
-                        answer[idx] += *coeff * *item;
-                    })
+        answer
+            .par_chunks_mut(256)
+            .enumerate()
+            .for_each(|(tile, out)| {
+                let start = tile * 256;
+                for (row, &coefficient) in state.matrix.chunks_exact(codeword_len).zip(challenge) {
+                    let count = out.len();
+                    for (out, &value) in out.iter_mut().zip(&row[start..start + count]) {
+                        *out += coefficient * value;
+                    }
+                }
             });
         answer
     }
@@ -92,49 +147,20 @@ where
         assert_eq!(challenge.len(), pp.num_rows());
         let num_cols = pp.code().message_len();
         let codeword_len = pp.code().codeword_len();
-
-        // optimized version
-        state
-            .matrix
-            .par_chunks_exact(codeword_len)
-            .zip(challenge.par_iter())
-            .map(|(row, coeff)| {
-                let mut part = vec![EF::zero(); num_cols];
-                for i in 0..num_cols {
-                    part[i] = *coeff * row[i];
-                }
-                part
-            })
-            .reduce(
-                || vec![EF::zero(); num_cols],
-                |mut a, b| {
-                    for i in 0..num_cols {
-                        a[i] += b[i];
+        let mut answer = vec![EF::zero(); num_cols];
+        answer
+            .par_chunks_mut(256)
+            .enumerate()
+            .for_each(|(tile, out)| {
+                let start = tile * 256;
+                for (row, &coefficient) in state.matrix.chunks_exact(codeword_len).zip(challenge) {
+                    let count = out.len();
+                    for (out, &value) in out.iter_mut().zip(&row[start..start + count]) {
+                        *out += coefficient * value;
                     }
-                    a
-                },
-            )
-
-        // original version
-        // assert_eq!(challenge.len(), pp.num_rows());
-        // let num_cols = pp.code().message_len();
-        // let codeword_len = pp.code().codeword_len();
-
-        // // Compute the answer as a linear combination.
-        // let mut answer = vec![EF::zero(); num_cols];
-        // state
-        //     .matrix
-        //     .chunks_exact(codeword_len)
-        //     .zip(challenge)
-        //     .for_each(|(row, coeff)| {
-        //         row.iter()
-        //             .take(num_cols)
-        //             .enumerate()
-        //             .for_each(|(idx, item)| {
-        //                 answer[idx] += *coeff * *item;
-        //             })
-        //     });
-        // answer
+                }
+            });
+        answer
     }
 
     /// Prover answers the query of columns of given indices
