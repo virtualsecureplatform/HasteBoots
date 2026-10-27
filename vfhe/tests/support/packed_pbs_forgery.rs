@@ -1,7 +1,51 @@
+// Select the Hadamard certificate while leaving key-switch product proofs on
+// their original backend. These helpers exist only in adversarial test modules.
+macro_rules! audit_decomposition_type {
+    () => { decomp::LaneProof<F,[u8;32]> };
+    ($extension:ty) => { decomp::ExtensionProof<F,$extension,[u8;32]> };
+}
+macro_rules! audit_hadamard_helpers {
+    (Independent $(,$extension:ty)?) => {
+        type HadamardProof=relation::RelationProof<F,[u8;32]>;
+        fn hadamard_with_declared_roots(prover:&mut Transcript<F>,reference:&mut Transcript<F>,
+            pp:&Parameters<C>,shape:&PackedShape<F>,factors:&[PackedTable<F>],
+            actual:&[Commitment<[u8;32]>],states:&[&State<F,Sha256>],declared:&[Commitment<[u8;32]>]) -> HadamardProof {
+            relation_with_declared_roots(prover,reference,pp,shape,factors,actual,states,declared)
+        }
+    };
+    (Aggregated,$extension:ty) => {
+        type HadamardProof=relation::aggregate::Proof<F,$extension,[u8;32]>;
+        fn hadamard_with_declared_roots(prover:&mut Transcript<F>,reference:&mut Transcript<F>,
+            pp:&Parameters<C>,shape:&PackedShape<F>,factors:&[PackedTable<F>],
+            actual:&[Commitment<[u8;32]>],states:&[&State<F,Sha256>],declared:&[Commitment<[u8;32]>]) -> HadamardProof {
+            let degree=<$extension as algebra::AbstractExtensionField<F>>::D;
+            let context=pp.context_digest::<F,Sha256>().unwrap();
+            prover.append_message(b"HasteBoots packed aggregated relation v1",&(shape,context,degree,declared));
+            reference.append_message(b"HasteBoots packed aggregated relation v1",&(shape,context,degree,declared));
+            let (zero,claim,values)=packed_zero::prove_with_terminal_values(prover,shape,factors).unwrap();
+            claim.check(shape,&values).unwrap();
+            let verified=packed_zero::verify(reference,shape,&zero).unwrap();
+            verified.check(shape,&values).unwrap();
+            prover.append_message(b"packed aggregated relation terminal values",&values);
+            reference.append_message(b"packed aggregated relation terminal values",&values);
+            let opening=pcs::matrix_weighted::aggregate::prove::<F,$extension,Sha256,_>(
+                pp,prover,actual,states,&claim.query,&values).unwrap();
+            pcs::matrix_weighted::aggregate::verify::<F,$extension,Sha256,_>(
+                pp,reference,actual,&verified.query,&values,&opening).unwrap();
+            relation::aggregate::Proof {zero,values,opening}
+        }
+    };
+}
 // This fixture deliberately reconstructs the public protocol from component
 // APIs. It is a malicious prover, not a call to pbs::prove with altered input.
 macro_rules! complete_foreign_trace_case {
     ($module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr $(, $extension:ty)?) => {
+        complete_foreign_trace_case!(@backend Independent,$module,$field,$prove,$verify,$pbs_prove,$pbs_verify,$version,$domain,$width,$repetitions $(,$extension)?);
+    };
+    (@aggregated $module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr, $extension:ty) => {
+        complete_foreign_trace_case!(@backend Aggregated,$module,$field,$prove,$verify,$pbs_prove,$pbs_verify,$version,$domain,$width,$repetitions,$extension);
+    };
+    (@backend $kind:ident,$module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr $(, $extension:ty)?) => {
         mod $module {
             use super::{params, secret};
             use algebra::{
@@ -24,6 +68,8 @@ macro_rules! complete_foreign_trace_case {
             use vfhe::{Encryptor, bfhe::Evaluator};
             type F = $field;
             type C = BlockReedSolomonCode<F>;
+            audit_hadamard_helpers!($kind $(,$extension)?);
+            type FullProof=pbs::Proof<F,[u8;32],audit_decomposition_type!($($extension)?),HadamardProof>;
             struct Sources {
                 tables: Vec<PackedTable<F>>,
                 roots: Vec<Commitment<[u8; 32]>>,
@@ -916,7 +962,7 @@ macro_rules! complete_foreign_trace_case {
                     states.push(&ev.states[2 * d]);
                     let declared =
                         bk::commitments::<F, Sha256, _>(pp.source, declared_br, &ev.roots).unwrap();
-                    let hadamard = relation_with_declared_roots(
+                    let hadamard = hadamard_with_declared_roots(
                         &mut prover,
                         &mut reference,
                         pp.source,
@@ -1121,7 +1167,7 @@ macro_rules! complete_foreign_trace_case {
                     };
                     let bytes =
                         bincode::serde::encode_to_vec(&forged, bincode::config::standard()).unwrap();
-                    let (forged, used): (pbs::Proof<F, [u8; 32] $(, decomp::ExtensionProof<F, $extension, [u8; 32]>)?>, _) =
+                    let (forged, used): (FullProof, _) =
                         bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
                     assert_eq!(used, bytes.len());
                     let result = pbs::$pbs_verify::<F, $($extension,)? Sha256, _>(

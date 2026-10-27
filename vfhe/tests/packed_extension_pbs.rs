@@ -393,3 +393,13 @@ native_extension_roundtrip!(babybear_aggregated_complete_batches_and_binding,
 native_extension_roundtrip!(goldilocks_aggregated_complete_batches_and_binding,
     Goldilocks,algebra::GoldilocksExtension3,4,0,
     prove_aggregated,verify_aggregated,AggregatedProof,pbs::AGGREGATED_PROTOCOL_VERSION);
+
+
+complete_foreign_trace_case!(@aggregated complete_aggregated_foreign_trace_babybear,
+    algebra::BabyBear,prove_extension,verify_extension,prove_aggregated,verify_aggregated,
+    snarks::packed_pbs::AGGREGATED_PROTOCOL_VERSION,
+    b"HasteBoots complete binary NAND PBS aggregated Hadamard v4",8,1,algebra::BabyBearExtension6);
+complete_foreign_trace_case!(@aggregated complete_aggregated_foreign_trace_goldilocks,
+    algebra::Goldilocks,prove_extension,verify_extension,prove_aggregated,verify_aggregated,
+    snarks::packed_pbs::AGGREGATED_PROTOCOL_VERSION,
+    b"HasteBoots complete binary NAND PBS aggregated Hadamard v4",4,1,algebra::GoldilocksExtension3);
