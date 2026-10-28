@@ -7,6 +7,11 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Packed masked source and ladder encodings now use base-coordinate FFTs when
+their domain lies in the base field. Frozen controls preserve complete proof
+bytes and transcripts in both selected fields. See `packed-coordinate-encoder.md`.
+The original security and complete-PBS performance gates remain open.
+
 Fresh complete version-11 binding audits now cover both backends and selected
 fields with sixty certificates: four accepted controls and fifty-six rejected
 attacks. Reference replay authenticates every actual-root opening and reports

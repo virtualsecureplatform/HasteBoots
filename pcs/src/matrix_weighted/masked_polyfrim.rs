@@ -99,6 +99,7 @@ where
             max_openings,
             EF::from_base(root),
         )
+        .and_then(|p| p.with_base_field_encoder::<F>())
         .map_err(|_| Error("mask geometry or disclosure capacity"))?;
         let basis: Vec<_> = (0..EF::D)
             .map(|i| EF::from_base_fn(|j| if i == j { F::one() } else { F::zero() }))

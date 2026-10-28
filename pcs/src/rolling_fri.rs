@@ -729,7 +729,7 @@ pub(crate) fn encode<F: Field>(coefficients: &[F], n: usize, shift: F) -> Vec<F>
 }
 // The coset is in Base, so evaluation commutes with taking polynomial-basis
 // coordinates. Retain the generic encoder as an independent arithmetic path.
-fn encode_extension<Base: Field, EF: AbstractExtensionField<Base>>(
+pub(crate) fn encode_extension<Base: Field, EF: AbstractExtensionField<Base>>(
     coefficients: &[EF],
     n: usize,
     shift: EF,

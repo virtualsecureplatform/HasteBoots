@@ -11,7 +11,7 @@ use crate::{
     rolling_fri,
     utils::{hash::Hash, merkle_tree::MerkleTree},
 };
-use algebra::{Field, matrix_weighted::MatrixPair};
+use algebra::{AbstractExtensionField, Field, matrix_weighted::MatrixPair};
 use helper::{FiatShamirTranscript, Transcript};
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +28,9 @@ pub struct Parameters<F> {
     blowup: usize,
     queries: usize,
     root: F,
+    // Arithmetic choice only: canonical codewords and protocol parameters agree.
+    #[serde(skip)]
+    encoder: fn(&[F], usize, F) -> Vec<F>,
 }
 impl<F: Field + Serialize> Parameters<F> {
     /// Require power-of-two message >=2, blowup >=2, nonzero width/query count
@@ -56,7 +59,26 @@ impl<F: Field + Serialize> Parameters<F> {
             blowup,
             queries,
             root,
+            encoder: rolling_fri::encode::<F>,
         })
+    }
+    /// Use coordinate-wise base FFTs on a base-field coset. This changes no
+    /// serialized parameter, canonical codeword, commitment or proof bytes.
+    pub fn with_base_field_encoder<Base: Field>(mut self) -> Result<Self, Error>
+    where
+        F: AbstractExtensionField<Base>,
+    {
+        let base = self
+            .root
+            .as_base_slice()
+            .first()
+            .copied()
+            .unwrap_or_else(Base::zero);
+        if F::from_base(base) != self.root {
+            return Err(Error("encoding root is outside requested base field"));
+        }
+        self.encoder = rolling_fri::encode_extension::<Base, F>;
+        Ok(self)
     }
     fn rounds(&self) -> usize {
         self.message.ilog2() as usize
@@ -134,7 +156,7 @@ fn state<F: Field + Serialize, H: Hash + Send + Sync>(
             .chunks_exact(pp.width)
             .map(|v| v[lane])
             .collect();
-        let encoded = rolling_fri::encode(&coefficients, n, pp.shift(layer));
+        let encoded = (pp.encoder)(&coefficients, n, pp.shift(layer));
         for (i, v) in encoded.into_iter().enumerate() {
             values[i * pp.width + lane] = v;
         }

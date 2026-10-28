@@ -18,6 +18,8 @@ pub struct Parameters<F> {
     queries: usize,
     max_openings: usize,
     root: F,
+    #[serde(skip)]
+    encoder: fn(&[F], usize, F) -> Vec<F>,
 }
 impl<F: Field + Serialize> Parameters<F> {
     /// Commit m logical vector coefficients, pad to 2m, and retain masks for an
@@ -59,21 +61,42 @@ impl<F: Field + Serialize> Parameters<F> {
             queries,
             max_openings,
             root,
+            encoder: rolling_fri::encode::<F>,
         })
+    }
+    /// Use base-coordinate FFTs without changing the masked protocol or its
+    /// disclosure allowance. The existing domain root must lie in Base.
+    pub fn with_base_field_encoder<Base: Field>(mut self) -> Result<Self, Error>
+    where
+        F: AbstractExtensionField<Base>,
+    {
+        let base = self
+            .root
+            .as_base_slice()
+            .first()
+            .copied()
+            .unwrap_or_else(Base::zero);
+        if F::from_base(base) != self.root {
+            return Err(Error("encoding root is outside requested base field"));
+        }
+        self.encoder = rolling_fri::encode_extension::<Base, F>;
+        Ok(self)
     }
     /// Maximum opening attempts after successful preflight, across this source.
     pub fn max_openings(&self) -> usize {
         self.max_openings
     }
     fn oracle(&self, wide: bool) -> super::Parameters<F> {
-        super::Parameters::new(
+        let mut oracle = super::Parameters::new(
             2 * self.message,
             self.width * if wide { 2 } else { 1 },
             self.blowup,
             self.queries,
             self.root,
         )
-        .expect("validated masked geometry")
+        .expect("validated masked geometry");
+        oracle.encoder = self.encoder;
+        oracle
     }
 }
 /// Private retained padding/mask state. Cannot be cloned or serialized.
@@ -1146,6 +1169,84 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.0, "noncanonical virtual-all field encoding");
     }
+    fn coordinate_encoder_equivalence<B, E>()
+    where
+        B: NTTField + Serialize,
+        E: AbstractExtensionField<B> + Serialize,
+    {
+        let root = E::from_base(B::generate_ntt_table(13).unwrap().root());
+        let generic = Parameters::new(2048, 2, 2, 1, 2, root).unwrap();
+        let optimized = generic.clone().with_base_field_encoder::<B>().unwrap();
+        let bytes = |v: &Parameters<E>| {
+            bincode::serde::encode_to_vec(v, bincode::config::standard()).unwrap()
+        };
+        assert_eq!(bytes(&generic), bytes(&optimized));
+        // Every coordinate is populated; the paired mask lanes are full extension values too.
+        let table = PackedTable::new(
+            11,
+            2,
+            (0..4096)
+                .map(|i| E::from_base_fn(|j| B::from(1 + i * (j + 1))))
+                .collect(),
+        )
+        .unwrap();
+        let mut ra = StdRng::seed_from_u64(3101);
+        let mut rb = ra.clone();
+        let mut a = commit::<E, Sha256, _>(&generic, &table, &mut ra).unwrap();
+        let mut b = commit::<E, Sha256, _>(&optimized, &table, &mut rb).unwrap();
+        assert_eq!(
+            rand::RngCore::next_u64(&mut ra),
+            rand::RngCore::next_u64(&mut rb)
+        );
+        assert_eq!(a.root(), b.root());
+        let query: Vec<_> = (0..11)
+            .map(|i| MatrixPair {
+                zero: Matrix::new(
+                    2,
+                    (0..4).map(|j| E::from_base(B::from(i + j + 1))).collect(),
+                )
+                .unwrap(),
+                one: Matrix::new(
+                    2,
+                    (0..4)
+                        .map(|j| E::from_base(B::from(2 * i + 3 * j + 2)))
+                        .collect(),
+                )
+                .unwrap(),
+            })
+            .collect();
+        let claim = table.evaluate(&query).unwrap();
+        for opening in 1..=2 {
+            let mut ta = Transcript::new_direct_extension::<B>();
+            let mut tb = Transcript::new_direct_extension::<B>();
+            let pa = prove(&mut ta, &generic, &mut a, &query, &claim).unwrap();
+            let pb = prove(&mut tb, &optimized, &mut b, &query, &claim).unwrap();
+            assert_eq!(
+                bincode::serde::encode_to_vec(&pa, bincode::config::standard()).unwrap(),
+                bincode::serde::encode_to_vec(&pb, bincode::config::standard()).unwrap()
+            );
+            // Cross-verification checks that the arithmetic selector is not protocol state.
+            let mut va = Transcript::new_direct_extension::<B>();
+            let mut vb = Transcript::new_direct_extension::<B>();
+            verify::<E, Sha256>(&mut va, &optimized, &a.root(), &query, &claim, &pa).unwrap();
+            verify::<E, Sha256>(&mut vb, &generic, &b.root(), &query, &claim, &pb).unwrap();
+            let after = ta.get_challenge(b"coordinate encoder after");
+            assert_eq!(after, tb.get_challenge(b"coordinate encoder after"));
+            assert_eq!(after, va.get_challenge(b"coordinate encoder after"));
+            assert_eq!(after, vb.get_challenge(b"coordinate encoder after"));
+            assert_eq!(a.spent(), opening);
+            assert_eq!(b.spent(), opening);
+        }
+    }
+    #[test]
+    fn babybear_coordinate_encoder_preserves_masked_proofs() {
+        coordinate_encoder_equivalence::<algebra::BabyBear, algebra::BabyBearExtension6>();
+    }
+    #[test]
+    fn goldilocks_coordinate_encoder_preserves_masked_proofs() {
+        coordinate_encoder_equivalence::<algebra::Goldilocks, algebra::GoldilocksExtension3>();
+    }
+
     #[test]
     fn capacity_checks() {
         type F = algebra::BabyBear;
