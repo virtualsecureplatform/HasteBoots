@@ -73,9 +73,9 @@ capacity. Hashes and public challenge dependence are outside this count.
 
 A field-element count alone does not establish hiding: observations can have
 linear dependencies that cancel masks while exposing witness information.
-A cumulative rank/disclosure audit for these actual ordered-matrix transcripts,
-a general masking argument, random-oracle/Merkle hiding and adaptive Fiat–Shamir
-analysis remain required. The conservative allowance can reject otherwise
+The finite cumulative audit below checks selected actual ordered-matrix
+transcripts. A general masking argument, random-oracle/Merkle hiding and adaptive
+Fiat–Shamir analysis remain required. The conservative allowance can reject otherwise
 interesting native profiles; it is not a security-matched parameter selector.
 The same-root vector-proximity reduction and whole-proof composition also remain
 open. No native complete-PBS latency or size result is claimed for this backend.
@@ -99,3 +99,52 @@ link. These are small reference fixtures, not native FHE proofs or a hiding rank
 audit. Logs and validated sources are under
 `target/performance/direct-packed-polyfrim-masked/`, source SHA-256
 `8406f2e7f2644c78bf3636582da3a03ce453351ccd977664d6c001281ee32d6c`.
+
+## Conditional cumulative linear-view audit
+
+The test-only coefficient model reconstructs every disclosed field element from
+one retained source's low coefficients, private high coefficients and independent
+mask coefficients. It uses independent matrix/coefficient folds and Horner
+polynomial evaluation, rather than production Polynomial/FFT routines. Actual
+serialized/decoded proofs verify first. A transcript replay then recovers their
+alpha, projection rows, rolling fold coins and query locations; its trailing
+challenge must match the actual prover. Counterfactual coefficient views keep
+those coins fixed. Their field values must match every decoded proof field before
+any rank calculation is accepted.
+
+Let A be the cumulative observation matrix for both openings, with columns
+partitioned into original witness coefficients w and private randomness eta.
+Let Y map w to the permitted ordered matrix responses. The test checks
+
+```
+rank([A; Y 0]) = rank(A_eta) + rank(Y).
+```
+
+For uniform eta and fixed coins, this says that the affine distribution of the
+linear observations depends on w only through Y*w. Both openings use the same
+randomness columns; the audit does not silently refresh masks between them.
+Each separate schedule uses an independently seeded fixture commitment.
+
+The cases cover both prime fields, width one/m=512 and width two/m=1024, with
+one sample per stage and a trusted lifetime of two. Each geometry has two dense
+queries and a separate dense/singular schedule. Width-two cases explicitly check
+noncommuting matrices. The singular schedule puts its projector at the final
+fold, so the permitted response rank is genuinely deficient; the audit computes
+that rank rather than assuming one independent constraint per output lane.
+A negative control adds an original witness coefficient outside the permitted
+view and must increase the augmented rank.
+
+This is a finite conditional field-value audit. It does not prove an adaptive
+zero-knowledge theorem, Merkle/random-oracle hiding, a uniform vector-proximity
+bound, or hiding of noncanonical serialized field representations. Hash values,
+challenge dependence and representation bytes require separate analysis. The
+small-prime/query fixtures are not concrete 128-bit parameter profiles.
+
+All eight rank cases pass, covering sixteen decoded openings, and every negative
+control increases rank. The genuinely singular schedules have permitted-response
+ranks one and three for widths one and two, respectively; the dense schedules
+have ranks two and four. All 65 selected release/locked regressions pass (46 PCS
+unit tests, four masked adapters, eight ordinary adapters and seven encoders).
+The eight checked records, full log and validated sources are under
+`target/performance/direct-packed-polyfrim-disclosure/`; source SHA-256 is
+`1785caaeefabb3ce6af5a3f785feab8897d4503c93fc21b6fc6e17133831ddac`.

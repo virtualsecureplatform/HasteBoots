@@ -2,6 +2,9 @@
 //!
 //! High-coefficient padding and an independent vector polynomial mask all
 //! public folds. A numerical disclosure guard is not a zero-knowledge theorem.
+#[cfg(test)]
+mod disclosure;
+
 use super::*;
 use algebra::matrix_weighted::{Matrix, PackedTable};
 use rand::{CryptoRng, Rng};

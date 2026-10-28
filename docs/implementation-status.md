@@ -14,8 +14,11 @@ virtual combined ladder. Session counters prevent silent mask refresh; numerical
 capacity is checked. All 63 selected release tests pass, including sixteen
 decoded masked packets and four fresh false-claim certificates. This is
 implementation progress, not a hiding theorem or
-native complete-PBS result. See `masked-packed-polyfrim.md`; cumulative rank,
-quantitative soundness and adaptive hash/Fiat–Shamir analysis remain open.
+native complete-PBS result. A new coefficient-space audit checks cumulative
+field disclosures against actual decoded two-opening transcripts, with negative
+controls. All eight rank cases and all 65 selected release regressions pass.
+See `masked-packed-polyfrim.md`; general masking, quantitative soundness
+and adaptive hash/Fiat–Shamir analysis remain open.
 
 The direct packed PolyFRIM algebraic core now converts canonical Boolean tables
 to vector-polynomial coefficients, applies ordered matrix folds and computes
