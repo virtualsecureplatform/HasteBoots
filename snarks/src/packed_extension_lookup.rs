@@ -10,6 +10,8 @@ use crate::packed_opening_batch::OpeningBatch;
 
 /// Lookup groups sharing deferred authentication of canonical sources.
 pub mod deferred;
+/// Multiple requests sharing scalar sum/identity challenges and PCS queries.
+pub mod shared;
 
 use crate::{
     packed_extension as bridge,
