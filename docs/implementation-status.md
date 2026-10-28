@@ -7,6 +7,13 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Native bootstrapping/switching key owners and their complete-PBS setup wrapper
+now support statically selected canonical backends, retaining original source
+states and validating native layouts plus all logical parameter geometries.
+Public setup remains independent of proof bytes. See
+`canonical-native-key-setup.md`; masked complete-proof composition and the
+original security/performance gates remain open.
+
 Shared-challenge polynomial identities now expose canonical backend
 authentication through the source registry, with retained borrowed factors and
 individually checked terminal equations. Existing optimized Brakedown paths are

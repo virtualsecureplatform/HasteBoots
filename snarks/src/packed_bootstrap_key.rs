@@ -230,3 +230,6 @@ where
 fn convert(e: impl std::fmt::Display) -> Error {
     Error(e.to_string())
 }
+
+/// Native key setup retaining statically selected canonical backend states.
+pub mod canonical;

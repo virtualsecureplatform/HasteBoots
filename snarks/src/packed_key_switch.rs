@@ -74,10 +74,11 @@ impl Config {
             .map_err(convert)
     }
     fn validate<F: NTTField, C>(&self, pp: &Parameters<C>) -> Result<(), Error> {
-        if !pp.width().is_power_of_two()
-            || pp.width() > self.n
-            || pp.num_vars() != (2 * self.n / pp.width()).ilog2() as usize
-        {
+        self.validate_geometry(pp.num_vars(), pp.width())
+    }
+    fn validate_geometry(&self, num_vars: usize, width: usize) -> Result<(), Error> {
+        if !width.is_power_of_two() || width > self.n
+            || num_vars != (2 * self.n / width).ilog2() as usize {
             return Err(error("key switching PCS dimensions"));
         }
         Ok(())
@@ -123,7 +124,20 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
-    config.validate::<F, C>(pp)?;
+    let tables = key_tables(pp.num_vars(), pp.width(), &config, key)?;
+    let (roots, states) = commit::<F, H, C>(pp, &tables)?;
+    Ok(ProverKey {
+        expected: ExpectedKey {
+            context: pp.context_digest::<F, H>().map_err(convert)?,
+            config,
+            roots,
+        },
+        tables,
+        states,
+    })
+}
+fn key_tables<F: NTTField>(num_vars: usize, width: usize, config: &Config, key: &[NTTGadgetRLWE<F>]) -> Result<Vec<PackedTable<F>>, Error> {
+    config.validate_geometry(num_vars, width)?;
     let d = config.digits::<F>()?;
     if key.len() != 1 || key[0].basis().bits() != config.bits || key[0].data().len() != d {
         return Err(error("switching key radix or chunks"));
@@ -135,23 +149,14 @@ where
                 return Err(error("switching key polynomial length"));
             }
             PackedTable::new(
-                pp.num_vars(),
-                pp.width(),
+                num_vars,
+                width,
                 p.a_slice().iter().chain(p.b_slice()).copied().collect(),
             )
             .map_err(convert)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let (roots, states) = commit::<F, H, C>(pp, &tables)?;
-    Ok(ProverKey {
-        expected: ExpectedKey {
-            context: pp.context_digest::<F, H>().map_err(convert)?,
-            config,
-            roots,
-        },
-        tables,
-        states,
-    })
+    Ok(tables)
 }
 /// Canonical private coefficients: duplicated digit columns, then the a||b sum.
 /// No native key column is trusted or imported by this adapter.
@@ -828,3 +833,6 @@ mod extraction_binding_tests {
         }
     }
 }
+
+/// Native key setup retaining statically selected canonical backend states.
+pub mod canonical;

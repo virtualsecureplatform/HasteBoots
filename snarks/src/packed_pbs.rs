@@ -19,6 +19,8 @@ use sumcheck::packed::PackedShape;
 use trace::pbs_trace::PBSTrace;
 
 mod hadamard;
+/// Native key ownership for statically selected canonical PCS backends.
+pub mod canonical_setup;
 /// Complete ordered PBS batches with joint cross-statement Hadamard authentication.
 pub mod batch;
 

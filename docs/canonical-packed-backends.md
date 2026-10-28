@@ -82,3 +82,8 @@ canonical registry after shared-challenge ZeroCheck. It checks each equation
 individually and borrows retained factors. See `canonical-shared-relations.md`;
 this does not replace the existing optimized multi-root Brakedown path or claim
 masked joint aggregation.
+
+Native evaluation-key ownership and the complete-PBS setup wrapper also support
+canonical backends. The original retained states carry lifetime counters across
+oracle borrows; expected public setup contains no private state. See
+`canonical-native-key-setup.md`. Complete masked proof composition remains open.
