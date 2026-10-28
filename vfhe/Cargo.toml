@@ -171,3 +171,11 @@ path = "examples/performance/packed_extension_babybear8.rs"
 [[example]]
 name = "packed_extension_pbs_babybear6"
 path = "examples/performance/packed_extension_babybear6.rs"
+
+[[example]]
+name = "packed_batch_pbs_babybear"
+path = "examples/performance/packed_batch_babybear.rs"
+
+[[example]]
+name = "packed_batch_pbs_goldilocks"
+path = "examples/performance/packed_batch_goldilocks.rs"
