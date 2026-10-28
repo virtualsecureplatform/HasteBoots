@@ -21,7 +21,9 @@ fn main() {
     let full=args.iter().any(|s|s=="--full");
     let separate=args.iter().any(|s|s=="--separate");
     let canonical=args.iter().any(|s|s=="--canonical-sources");
-    assert!(!(separate && canonical), "--canonical-sources requires a joint batch");
+    let comparisons=args.iter().any(|s|s=="--joint-comparisons");
+    assert!([separate,canonical,comparisons].into_iter().filter(|x|*x).count()<=1,
+        "select one of --separate, --canonical-sources, --joint-comparisons");
     let validation=args.iter().any(|s|s=="--validation-batches");
     let count=args.iter().position(|s|s=="--batch-size").map(|i|args[i+1].parse::<usize>().unwrap()).unwrap_or(1);
     assert!(count>0 && !(validation && args.iter().any(|s|s=="--batch-size")));
@@ -167,8 +169,10 @@ fn main() {
             let timer=Instant::now();let (proof,used):($ty,_)=bincode::serde::decode_from_slice(&bytes,bincode::config::standard()).unwrap();
             assert_eq!(used,proof_bytes);let deserialize_ns=timer.elapsed().as_nanos();drop(bytes);
             let timer=Instant::now();($verify)(&proof);let verify_ns=timer.elapsed().as_nanos();
-            let root_counts:Vec<usize>=($inventory)(&proof);let total:usize=root_counts.iter().sum();
-            println!("HB_BATCH_ROOTS {{\"scope\":\"verified-proof-root-slots\",\"proof_sha256\":\"{proof_sha256}\",\"batch_size\":{count},\"total\":{total},\"per_member\":{root_counts:?},\"trusted_key_roots_included\":false,\"whole_proof_security_certified\":false}}");
+            let (root_counts,outer):(Vec<usize>,(usize,usize))=($inventory)(&proof);
+            let total:usize=root_counts.iter().sum::<usize>()+outer.0+outer.1;
+            let outer_metadata=if comparisons {format!(",\"blind_rotation_reciprocals\":{},\"key_switch_reciprocals\":{}",outer.0,outer.1)} else {String::new()};
+            println!("HB_BATCH_ROOTS {{\"scope\":\"verified-proof-root-slots\",\"proof_sha256\":\"{proof_sha256}\",\"batch_size\":{count},\"total\":{total},\"per_member\":{root_counts:?},\"trusted_key_roots_included\":false,\"whole_proof_security_certified\":false{outer_metadata}}}");
             (prove_ns,serialization_ns,complete_ns,proof_bytes,proof_sha256,deserialize_ns,verify_ns)
         }};}
         let (prove_ns,serialization_ns,complete_ns,proof_bytes,proof_sha256,deserialize_ns,verify_ns)=if separate {
@@ -176,23 +180,33 @@ fn main() {
                 Vec<pbs::DeferredProof<F,EF,[u8;32]>>,
                 |proof:&Vec<pbs::DeferredProof<F,EF,[u8;32]>>| {assert_eq!(proof.len(),count);for i in 0..count {
                     pbs::verify_deferred::<F,EF,Sha256,_>(&pp,&verifier,&statements[i],&proof[i]).unwrap();
-                }},|proof:&Vec<pbs::DeferredProof<F,EF,[u8;32]>>|proof.iter().map(|m|snarks::packed_root_inventory::inventory(m).total()).collect::<Vec<_>>())
+                }},|proof:&Vec<pbs::DeferredProof<F,EF,[u8;32]>>|(proof.iter().map(|m|snarks::packed_root_inventory::inventory(m).total()).collect::<Vec<_>>(),(0,0)))
+        } else if comparisons {
+            certificate!(pbs::batch::shared::prove::<F,EF,Sha256,_>(&pp,&setup,&statements,&traces.iter().collect::<Vec<_>>()).unwrap(),
+                pbs::batch::shared::Proof<F,EF,[u8;32]>,
+                |proof|pbs::batch::shared::verify::<F,EF,Sha256,_>(&pp,&verifier,&statements,proof).unwrap(),
+                |proof:&pbs::batch::shared::Proof<F,EF,[u8;32]>| {
+                    let inventory=snarks::packed_root_inventory::comparison_batch_inventory(proof);
+                    (inventory.members.iter().map(|m|m.total()).collect::<Vec<_>>(),
+                        (inventory.blind_rotation_reciprocals,inventory.key_switch_reciprocals))
+                })
         } else if canonical {
             certificate!(pbs::batch::canonical::prove::<F,EF,Sha256,_>(&pp,&setup,&statements,&traces.iter().collect::<Vec<_>>()).unwrap(),
                 pbs::batch::canonical::Proof<F,EF,[u8;32]>,
                 |proof|pbs::batch::canonical::verify::<F,EF,Sha256,_>(&pp,&verifier,&statements,proof).unwrap(),
-                |proof:&pbs::batch::canonical::Proof<F,EF,[u8;32]>|proof.members.iter().map(|m|snarks::packed_root_inventory::inventory(m).total()).collect::<Vec<_>>())
+                |proof:&pbs::batch::canonical::Proof<F,EF,[u8;32]>|(proof.members.iter().map(|m|snarks::packed_root_inventory::inventory(m).total()).collect::<Vec<_>>(),(0,0)))
         } else {
             certificate!(pbs::batch::prove::<F,EF,Sha256,_>(&pp,&setup,&statements,&traces.iter().collect::<Vec<_>>()).unwrap(),
                 pbs::batch::Proof<F,EF,[u8;32]>,
                 |proof|pbs::batch::verify::<F,EF,Sha256,_>(&pp,&verifier,&statements,proof).unwrap(),
-                |proof:&pbs::batch::Proof<F,EF,[u8;32]>|proof.members.iter().map(|m|snarks::packed_root_inventory::inventory(m).total()).collect::<Vec<_>>())
+                |proof:&pbs::batch::Proof<F,EF,[u8;32]>|(proof.members.iter().map(|m|snarks::packed_root_inventory::inventory(m).total()).collect::<Vec<_>>(),(0,0)))
         };
-        let protocol_version=if separate {5} else if canonical {7} else {6};
-        let mode=if separate {"separate-v5"} else if canonical {"canonical-sources"} else {"joint-hadamard"};
-        let transcript=if separate {pbs::DEFERRED_TRANSCRIPT_ID} else if canonical {pbs::batch::canonical::TRANSCRIPT_ID} else {pbs::batch::TRANSCRIPT_ID};
+        let protocol_version=if comparisons {9} else if separate {5} else if canonical {7} else {6};
+        let mode=if comparisons {"joint-comparisons"} else if separate {"separate-v5"} else if canonical {"canonical-sources"} else {"joint-hadamard"};
+        let transcript=if comparisons {pbs::batch::shared::TRANSCRIPT_ID} else if separate {pbs::DEFERRED_TRANSCRIPT_ID} else if canonical {pbs::batch::canonical::TRANSCRIPT_ID} else {pbs::batch::TRANSCRIPT_ID};
+        let group_metadata=if comparisons {format!(",\"comparison_group_size\":4,\"blind_rotation_groups\":{},\"key_switch_groups\":{}",(2*count).div_ceil(4),count.div_ceil(4))} else {String::new()};
         let scope=if separate {"complete-serialized-independent-public-verifiers"} else {"complete-serialized-public-batch-verifier"};
-        println!("HB_FULL_BATCH_PBS {{\"kind\":\"complete-binary-nand-pbs-batch\",\"field\":\"{FIELD}\",\"mode\":\"{mode}\",\"protocol_version\":{protocol_version},\"transcript\":\"{transcript}\",\"batch_size\":{count},\"full_parameters\":{full},\"verification_scope\":\"{scope}\",\"verified\":true,\"seed\":42,\"prime\":{},\"width\":{width},\"lookup_field_degree\":{},\"helper_left_extra\":{helper_left_extra},\"polynomial_size\":{},\"input_dimension\":{},\"output_dimension\":{},\"basis_bits\":{},\"key_switch_basis_bits\":{},\"lookup_repetitions\":1,\"setup_ns\":{setup_ns},\"trace_ns\":{trace_ns},\"prove_ns\":{prove_ns},\"serialization_ns\":{serialization_ns},\"complete_ns\":{complete_ns},\"deserialize_ns\":{deserialize_ns},\"verify_ns\":{verify_ns},\"proof_bytes\":{proof_bytes},\"proof_sha256\":\"{proof_sha256}\",\"statements_sha256\":\"{statements_sha256}\",\"fhe_parameters_sha256\":\"{fhe_parameters_sha256}\",\"native_keys_sha256\":\"{native_keys_sha256}\",\"whole_proof_security_certified\":false}}",
+        println!("HB_FULL_BATCH_PBS {{\"kind\":\"complete-binary-nand-pbs-batch\",\"field\":\"{FIELD}\",\"mode\":\"{mode}\",\"protocol_version\":{protocol_version},\"transcript\":\"{transcript}\",\"batch_size\":{count},\"full_parameters\":{full},\"verification_scope\":\"{scope}\",\"verified\":true,\"seed\":42,\"prime\":{},\"width\":{width},\"lookup_field_degree\":{},\"helper_left_extra\":{helper_left_extra},\"polynomial_size\":{},\"input_dimension\":{},\"output_dimension\":{},\"basis_bits\":{},\"key_switch_basis_bits\":{},\"lookup_repetitions\":1,\"setup_ns\":{setup_ns},\"trace_ns\":{trace_ns},\"prove_ns\":{prove_ns},\"serialization_ns\":{serialization_ns},\"complete_ns\":{complete_ns},\"deserialize_ns\":{deserialize_ns},\"verify_ns\":{verify_ns},\"proof_bytes\":{proof_bytes},\"proof_sha256\":\"{proof_sha256}\",\"statements_sha256\":\"{statements_sha256}\",\"fhe_parameters_sha256\":\"{fhe_parameters_sha256}\",\"native_keys_sha256\":\"{native_keys_sha256}\",\"whole_proof_security_certified\":false{group_metadata}}}",
             F::MODULUS_VALUE,EF::D,params.ring_dimension(),params.lwe_dimension(),params.lwe_dimension(),params.blind_rotation_basis().bits(),params.key_switching_basis_bits());
         for (index,((_,_,left,right),digest)) in inputs.iter().zip(&member_digests).enumerate() {
             println!("HB_BATCH_MEMBER {{\"batch_size\":{count},\"index\":{index},\"left_plaintext\":{left},\"right_plaintext\":{right},\"decrypted_plaintext\":{},\"statement_sha256\":\"{digest}\",\"proof_sha256\":\"{proof_sha256}\",\"verified\":true}}",1-left*right);

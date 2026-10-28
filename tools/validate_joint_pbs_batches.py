@@ -14,12 +14,13 @@ import re
 from full_pbs_budget import full_bounds,ROLES
 
 MODES={
+    'joint-comparisons':(9,'merlin-direct-joint-comparisons-pbs-batch-v1','complete-serialized-public-batch-verifier'),
     'canonical-sources':(7,'merlin-direct-canonical-source-pbs-batch-v1','complete-serialized-public-batch-verifier'),
     'joint-hadamard':(6,'merlin-direct-joint-hadamard-pbs-batch-v1','complete-serialized-public-batch-verifier'),
     'separate-v5':(5,'merlin-direct-aggregated-hadamard-deferred-lookup-sources-v1','complete-serialized-independent-public-verifiers'),
 }
 def conservative_errors(record,layouts):
-    """Retain batch_size times every checked native standalone-v5 error term.
+    """Retain batch_size times the checked standalone v5 (or v8) error terms.
 
     Individual ZeroCheck equations remain separate under shared fresh matrices.
     The old per-root PCS counts dominate the joint concatenated-word term/tail;
@@ -40,9 +41,22 @@ def conservative_errors(record,layouts):
     if type(p) is not int or p<2 or type(bits) is not int or bits<1:
         raise ValueError('missing batch field/radix')
     digits=((p-1).bit_length()+bits-1)//bits
+    comparisons=mode=='joint-comparisons'
+    if comparisons:
+        groups=dict(comparison_group_size=4,blind_rotation_groups=(2*count+3)//4,
+                    key_switch_groups=(count+3)//4)
+        if any(type(record.get(k)) is not int or record[k]!=v for k,v in groups.items()):
+            raise ValueError('comparison batch group inventory mismatch')
     standalone=dict(record,kind='complete-binary-nand-pbs',protocol_version=5,
         transcript=MODES['separate-v5'][1],lookup_backend='deferred-extension',
         hadamard_backend='multi-root',private_coefficient_roots=2*digits+1,ntt_links=2*digits+1)
+    if comparisons:
+        # Every equation stays separate, as in v8. Retaining B copies of the
+        # v8 per-root PCS inventory conservatively covers bounded joint packets.
+        # There are 2*(ceil(2B/4)+ceil(B/4)) actual lookup cancellations, <=6B.
+        # No independence between scalar equations or members is assumed.
+        standalone.update(protocol_version=8,transcript='merlin-direct-shared-query-comparisons-v1',
+                          lookup_backend='shared-extension')
     return {name:count*error for name,error in full_bounds(standalone,layouts).items()}
 
 def validate(text,field,full=True,mode='joint-hadamard',reference_text=None):
@@ -83,6 +97,9 @@ def validate(text,field,full=True,mode='joint-hadamard',reference_text=None):
         expected_inventory=dict(scope='verified-proof-root-slots',batch_size=count,
             proof_sha256=packet['proof_sha256'],total=count*roots_per_member,
             per_member=[roots_per_member]*count,trusted_key_roots_included=False,whole_proof_security_certified=False)
+        if mode=='joint-comparisons':
+            expected_inventory.update(per_member=[roots_per_member-2*ndigits-sdigits]*count,
+                blind_rotation_reciprocals=count*2*ndigits,key_switch_reciprocals=count*sdigits)
         if any(type(inventory.get(k)) is not type(v) for k,v in expected_inventory.items()) or any(type(v) is not int for v in inventory.get('per_member',[])) or inventory!=expected_inventory:raise ValueError('unlinked or incorrect batch root inventory')
         for index,member in enumerate(members[offset:offset+count]):
             left,right=index&1,(index>>1)&1
@@ -101,7 +118,7 @@ def validate(text,field,full=True,mode='joint-hadamard',reference_text=None):
     result=dict(field=field,mode=mode,full_parameters=full,batch_sizes=[1,4,16],packets=packets,
         members=members,layouts=layouts,inventories=inventories,
         conditional_21_member_interactive_bits=-math.log2(float(union)),
-        scope=('independent standalone v5 PBS proofs' if mode=='separate-v5' else
+        scope=('complete cross-statement Hadamard and comparison authentication with canonical source deduplication' if mode=='joint-comparisons' else 'independent standalone v5 PBS proofs' if mode=='separate-v5' else
                'complete cross-statement Hadamard authentication with per-member remaining PBS constraints'
                + (' and canonical source deduplication' if mode=='canonical-sources' else '')),
         whole_proof_security_certified=False)
