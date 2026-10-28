@@ -70,3 +70,20 @@ per-process resource control. Its raw times are ineligible for performance
 comparison; the original requirement for isolated security-matched timing runs
 is unchanged. The frozen native executable and its executed source archive
 remain unchanged while development continues.
+
+## First native run: terminal failure
+
+The initial Goldilocks proving process exited with status 101 at accumulator
+linkage: `insufficient private mask lifetime`. No proof, verified record or
+replay result was produced. Its exact frozen sources, executable, logs and
+terminal status remain preserved. The partial run peaked at 46,740,460 KiB RSS;
+this is not a complete-PBS memory bound. Raw time is excluded from comparison
+as recorded above.
+
+The copied small-fixture accumulator-input allowance was `width+8` (12).
+At 728 native rounds, the padded row domain has ten bits. The actual linkage
+uses a base query, initial-row query and eleven shift queries: thirteen
+openings before the monomial NTT's additional `width` openings. Goldilocks needs
+17 in that owner. Trusted native allowances must be derived from this operation
+schedule and checked before expensive proving. The original FHE parameters,
+mask-capacity formula and security/performance requirements remain unchanged.

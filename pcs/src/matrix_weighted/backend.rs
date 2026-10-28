@@ -40,6 +40,16 @@ pub trait CanonicalPcs<F: PrimeField, H: Hash + Send + Sync> {
     fn num_vars(&self) -> usize;
     /// Original consecutive lane count.
     fn width(&self) -> usize;
+    /// Declared per-source opening lifetime, if this backend bounds reuse.
+    /// None means the backend does not expose a finite opening limit.
+    fn opening_limit(&self) -> Option<usize> {
+        None
+    }
+    /// Remaining private allowance, when tracked by the retained owner.
+    /// This is a preflight observation, not an atomic multi-source reservation.
+    fn remaining_openings(&self, _state: &Self::State) -> Result<Option<usize>, Self::Error> {
+        Ok(None)
+    }
     /// Complete context used together with the root for alias decisions.
     fn context(&self) -> Result<H::Output, Self::Error>;
     /// Normalize a checked claim for this backend's transcript representation.
@@ -198,6 +208,12 @@ where
     const REGISTRY_DOMAIN: &'static [u8] = b"masked packed opening registry v2";
     const CLAIM_DOMAIN: &'static [u8] = b"masked packed opening claim v2";
     const SEAL_DOMAIN: &'static [u8] = b"masked packed opening seal v2";
+    fn opening_limit(&self) -> Option<usize> {
+        Some(self.max_openings())
+    }
+    fn remaining_openings(&self, state: &Self::State) -> Result<Option<usize>, Self::Error> {
+        Ok(Some(self.max_openings().saturating_sub(state.spent()?)))
+    }
     fn num_vars(&self) -> usize {
         self.num_vars()
     }
@@ -298,6 +314,12 @@ where
     const REGISTRY_DOMAIN: &'static [u8] = b"joint-source masked packed opening registry v1";
     const CLAIM_DOMAIN: &'static [u8] = b"joint-source masked packed opening claim v1";
     const SEAL_DOMAIN: &'static [u8] = b"joint-source masked packed opening seal v1";
+    fn opening_limit(&self) -> Option<usize> {
+        Some(self.max_openings())
+    }
+    fn remaining_openings(&self, state: &Self::State) -> Result<Option<usize>, Self::Error> {
+        Ok(Some(self.max_openings().saturating_sub(state.spent()?)))
+    }
     fn num_vars(&self) -> usize {
         self.num_vars()
     }

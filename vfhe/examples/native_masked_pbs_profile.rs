@@ -39,22 +39,23 @@ macro_rules! profile {
             const WIDTH: usize = $width;
             let cfg = pbs::Config::new::<F>(1024, 728, 8, 5, 1, 1).unwrap();
             let dims = cfg.variables(WIDTH).unwrap();
+            let budgets = cfg.canonical_opening_budget(WIDTH).unwrap();
             let make = |vars, budget| (vars..25).find_map(|physical| Parameters::<F, E>::new(vars, WIDTH, physical, 2, 128, budget).ok())
                 .expect("native masked geometry").with_transient_source_values();
-            let cpp = make(dims[0], WIDTH + 2);
-            let epp = make(dims[0], WIDTH + 1);
-            let key = make(dims[0], 1);
-            let input = make(dims[0], 2);
-            let borrow = make(dims[0], 3);
-            let helper = make(dims[1], 2);
-            let mono = make(dims[0], WIDTH + 1);
-            let acc = [make(dims[0], WIDTH + 8), make(dims[0], WIDTH + 1), make(dims[0], 3), make(dims[0], 2)];
-            let fco = make(dims[2], WIDTH + 2);
-            let fev = make(dims[2], WIDTH + 1);
-            let fkey = make(dims[2], 1);
-            let fin = make(dims[2], 2);
-            let fborrow = make(dims[2], 3);
-            let fhelper = make(dims[3], 2);
+            let cpp = make(dims[0], budgets.coefficients);
+            let epp = make(dims[0], budgets.evaluations);
+            let key = make(dims[0], budgets.key);
+            let input = make(dims[0], budgets.inputs);
+            let borrow = make(dims[0], budgets.borrows);
+            let helper = make(dims[1], budgets.helper);
+            let mono = make(dims[0], budgets.monomial);
+            let acc = budgets.accumulators.map(|allowance| make(dims[0], allowance));
+            let fco = make(dims[2], budgets.final_coefficients);
+            let fev = make(dims[2], budgets.final_evaluations);
+            let fkey = make(dims[2], budgets.final_key);
+            let fin = make(dims[2], budgets.final_input);
+            let fborrow = make(dims[2], budgets.final_borrows);
+            let fhelper = make(dims[3], budgets.final_helper);
             let parameters = [&cpp, &epp, &key, &input, &borrow, &helper, &mono, &acc[0], &acc[1], &acc[2], &acc[3], &fco, &fev, &fkey, &fin, &fborrow, &fhelper];
             let geometry = parameters.iter().map(|p| (p.num_vars(), p.physical_vars(), p.width(), p.max_openings())).collect::<Vec<_>>();
             eprintln!("HB_NATIVE_PBS_GEOMETRY {:?}", geometry);
@@ -66,6 +67,7 @@ macro_rules! profile {
                     coefficients: &fco, evaluations: &fev, key: &fkey, input: &fin, borrows: &fborrow, helper: &fhelper,
                 },
             };
+            pp.check_opening_limits::<F, Sha256>(&cfg).unwrap();
             let native_params = *$native;
             let fhe_parameters_sha256 = format!("{:x}", Sha256::digest(format!("{native_params:?}")));
             let sk = SecretKeyPack::with_rng(native_params, Prg::from_seed(Block::from([42u8; 16])));

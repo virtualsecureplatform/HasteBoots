@@ -76,6 +76,12 @@ impl Shape {
     pub fn padded_rounds(&self) -> usize {
         self.padded_rounds
     }
+    /// Exact query counts for INPUT_ACC through DECOMPOSITION_B, before
+    /// any other protocol uses the same owners. Shift branches are retained.
+    pub fn opening_counts(&self, width: usize) -> Result<[usize; 7], Error> {
+        self.coefficient_variables(width)?;
+        Ok([self.row_variables() + 3, 1, 3, 2, 1, 1, 1])
+    }
     fn coefficient_variables(&self, width: usize) -> Result<usize, Error> {
         if !width.is_power_of_two() || width > self.polynomial_size {
             return Err(error("packing does not divide polynomial size"));
@@ -641,6 +647,10 @@ mod mapping_tests {
             }
             assert_eq!(actual, shifted.evaluate(&base).unwrap());
             let qs = queries(&shape, k, &base).unwrap();
+            assert_eq!(
+                qs.iter().map(Vec::len).collect::<Vec<_>>(),
+                shape.opening_counts(k).unwrap()
+            );
             let optimized = evaluate_many(&table, &qs[INPUT_ACC]).unwrap();
             for (value, query) in optimized.iter().zip(&qs[INPUT_ACC]) {
                 assert_eq!(*value, table.evaluate(query).unwrap());

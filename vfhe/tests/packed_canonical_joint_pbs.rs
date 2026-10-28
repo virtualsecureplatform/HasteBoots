@@ -2,7 +2,7 @@ use algebra::{AsInto, Field};
 use pcs::matrix_weighted::masked_polyfrim::joint::{
     Parameters as MaskedParameters, Proof as MaskedProof,
 };
-use rand::{SeedableRng, rngs::StdRng};
+use rand::{RngCore, SeedableRng, rngs::StdRng};
 use sha2::{Digest, Sha256};
 use snarks::{
     packed_key_switch::canonical::protocol as ks,
@@ -188,7 +188,10 @@ macro_rules! complete_roundtrip {
  assert!(setup.br_oracles(&kpp).unwrap().iter().all(|s|s.state.spent().unwrap()==1));assert!(setup.ks_oracles(&fkey).unwrap().iter().all(|s|s.state.spent().unwrap()==1));
  let serialization_start=Instant::now();let bytes=bincode::serde::encode_to_vec(&proof,bincode::config::standard()).unwrap();let serialization_s=serialization_start.elapsed().as_secs_f64();let decode_start=Instant::now();let(proof,used):(shared::Proof<F,E,[u8;32],MaskedProof<E,[u8;32]>,MaskedProof<E,[u8;32]>>,usize)=bincode::serde::decode_from_slice(&bytes,bincode::config::standard()).unwrap();assert_eq!(used,bytes.len());let decode_s=decode_start.elapsed().as_secs_f64();let verify_start=Instant::now();shared::verify::<F,E,Sha256,_>(&pp,&expected,&statement,&proof).unwrap();let verify_s=verify_start.elapsed().as_secs_f64();
  let inventory=snarks::packed_root_inventory::canonical_shared_inventory(&proof);let bits=F::MODULUS_VALUE.ilog2() as usize+1;let d=bits.div_ceil(8);let s=bits.div_ceil(5);assert_eq!(inventory.total(),8*d+4*s+16);assert_eq!(inventory.categories["key_switch_input"],1);
- let old_prove_start=Instant::now();let old=canonical::prove::<F,E,Sha256,_,_>(&pp,&setup,&statement,&trace,&mut StdRng::seed_from_u64(943)).unwrap();let old_prove_s=old_prove_start.elapsed().as_secs_f64();drop(trace);
+ let old_prove_start=Instant::now();let old=canonical::prove::<F,E,Sha256,_,_>(&pp,&setup,&statement,&trace,&mut StdRng::seed_from_u64(943)).unwrap();let old_prove_s=old_prove_start.elapsed().as_secs_f64();
+ let mut exhausted_rng=StdRng::seed_from_u64(944);let mut untouched_rng=exhausted_rng.clone();
+ assert!(shared::prove::<F,E,Sha256,_,_>(&pp,&setup,&statement,&trace,&mut exhausted_rng).unwrap_err().to_string().contains("exhausted retained native key allowance"));
+ assert_eq!(exhausted_rng.next_u64(),untouched_rng.next_u64());drop(trace);
  let old_serialization_start=Instant::now();let old_bytes=bincode::serde::encode_to_vec(&old,bincode::config::standard()).unwrap();let old_serialization_s=old_serialization_start.elapsed().as_secs_f64();let old_decode_start=Instant::now();let(old,used):(canonical::Proof<F,E,[u8;32],MaskedProof<E,[u8;32]>,MaskedProof<E,[u8;32]>>,usize)=bincode::serde::decode_from_slice(&old_bytes,bincode::config::standard()).unwrap();assert_eq!(used,old_bytes.len());let old_decode_s=old_decode_start.elapsed().as_secs_f64();let old_verify_start=Instant::now();canonical::verify::<F,E,Sha256,_>(&pp,&expected,&statement,&old).unwrap();assert_eq!(old.protocol_version,10);let old_verify_s=old_verify_start.elapsed().as_secs_f64();
  assert!(setup.br_oracles(&kpp).unwrap().iter().all(|s|s.state.spent().unwrap()==2));assert!(setup.ks_oracles(&fkey).unwrap().iter().all(|s|s.state.spent().unwrap()==2));
  let shared_children=common_children(&proof)+proof.decomposition.iter().map(shared_radix_children).sum::<usize>()+key_common_children(&proof.key_switch)+shared_radix_children(&proof.key_switch.decomposition);

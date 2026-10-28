@@ -45,6 +45,8 @@ pub type Proof<F, EF, O, S, B> = BackendProof<
     decomp::canonical::Proof<F, EF, O, S, B>,
     final_stage::Proof<F, EF, O, S, B>,
 >;
+/// Trusted per-source opening allowances derived from the public PBS shape.
+pub mod budget;
 mod stages;
 #[derive(Serialize)]
 struct PublicStatement<F> {
@@ -146,6 +148,7 @@ where
         },
         setup,
     )?;
+    pp.check_opening_limits::<F, H>(&setup.config)?;
     Ok(())
 }
 fn contexts<F, H, P>(pp: &Parameters<'_, P>) -> Result<Vec<H::Output>, Error>
@@ -353,6 +356,21 @@ where
     let timer = Instant::now();
     let expected = setup.verifier();
     validate::<F, EF, H, P>(pp, &expected)?;
+    for oracle in setup
+        .br_oracles(pp.key)
+        .map_err(convert)?
+        .into_iter()
+        .chain(setup.ks_oracles(pp.final_stage.key).map_err(convert)?)
+    {
+        if oracle
+            .parameters
+            .remaining_openings(oracle.state)
+            .map_err(convert)?
+            .is_some_and(|n| n < 1)
+        {
+            return Err(error("exhausted retained native key allowance"));
+        }
+    }
     let cfg = &expected.config;
     let width = pp.coefficients.width();
     let d = cfg

@@ -39,7 +39,7 @@ def main():
     geometry = json.loads((directory / 'geometry.json').read_text())
     logical = [dims[0]] * 5 + [dims[1]] + [dims[0]] * 5 + [dims[2]] * 5 + [dims[3]]
     budgets = [width + 2, width + 1, 1, 2, 3, 2, width + 1,
-               width + 8, width + 1, 3, 2, width + 2, width + 1, 1, 2, 3, 2]
+               width + (record['lwe_dimension'] - 1).bit_length() + 3, width + 1, 3, 2, width + 2, width + 1, 1, 2, 3, 2]
     assert len(geometry) == len(logical) == len(budgets) == 17
     for (variables, physical, lanes, budget), expected_vars, expected_budget in zip(geometry, logical, budgets):
         assert variables == expected_vars and physical >= variables and lanes == width and budget == expected_budget
