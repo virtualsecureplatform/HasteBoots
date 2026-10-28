@@ -1,5 +1,5 @@
 //! Complete binary NAND PBS version 11 with shared canonical radix comparisons.
-//! Public algebra and independent PCS packets; not a whole-proof security claim.
+//! Public algebra and backend-selected PCS packets; not a whole-proof security claim.
 pub use super::Parameters;
 use super::*;
 pub const PROTOCOL_VERSION: u32 = 11;
