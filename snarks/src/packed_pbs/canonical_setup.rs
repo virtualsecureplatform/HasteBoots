@@ -55,6 +55,10 @@ where
     H: Hash + Send + Sync,
     P: CanonicalPcs<F, H>,
 {
+    /// Borrow the original switching-key owner for canonical final-stage proving.
+    pub fn switching_key(&self) -> &ks::canonical::ProverKey<F, H, P> {
+        &self.ks
+    }
     /// Public trusted roots/configuration only; no retained source state escapes.
     pub fn verifier(&self) -> VerifierSetup<H::Output> {
         self.verifier.clone()
@@ -152,4 +156,9 @@ where
     P: CanonicalPcs<F, H>,
 {
     ks::canonical::public_oracles::<F, H, P>(pp, &setup.ks).map_err(convert)
+}
+
+/// Trusted switching-key descriptor for canonical final-stage verification.
+pub fn switching_key<O>(setup: &VerifierSetup<O>) -> &ks::ExpectedKey<O> {
+    &setup.ks
 }

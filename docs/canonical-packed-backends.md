@@ -105,3 +105,8 @@ Radix decomposition now composes canonical reconstruction, zero borrow endpoints
 and per-limb extension comparisons against original source/digit roots. See
 `canonical-packed-decomposition.md`; shared comparison aggregation and complete
 masked PBS remain open.
+
+Final key switching now composes canonical NTT, key-product, decomposition and
+extraction authentication. The randomized public-input root has a separate
+known-table check. See `canonical-packed-key-switch.md`; complete masked PBS
+composition remains open.

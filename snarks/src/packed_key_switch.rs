@@ -651,12 +651,15 @@ fn input<F: NTTField, C>(
     cfg: &Config,
     final_acc: &[F],
 ) -> Result<PackedTable<F>, Error> {
+    input_dimensions(pp.num_vars(),pp.width(),cfg,final_acc)
+}
+fn input_dimensions<F:NTTField>(num_vars:usize,width:usize,cfg:&Config,final_acc:&[F])->Result<PackedTable<F>,Error>{
     if final_acc.len() != 2 * cfg.n {
         return Err(error("final accumulator length"));
     }
     PackedTable::new(
-        pp.num_vars(),
-        pp.width(),
+        num_vars,
+        width,
         final_acc[..cfg.n]
             .iter()
             .chain(&final_acc[..cfg.n])
@@ -672,6 +675,9 @@ fn extraction_tables<F: NTTField, C>(
     a: &[F],
     b: F,
 ) -> Result<(PackedTable<F>, PackedTable<F>), Error> {
+    extraction_tables_dimensions(pp.num_vars(),pp.width(),cfg,acc,a,b)
+}
+fn extraction_tables_dimensions<F:NTTField>(num_vars:usize,width:usize,cfg:&Config,acc:&[F],a:&[F],b:F)->Result<(PackedTable<F>,PackedTable<F>),Error>{
     if acc.len() != 2 * cfg.n || a.len() != cfg.lwe {
         return Err(error("extraction endpoint length"));
     }
@@ -687,26 +693,32 @@ fn extraction_tables<F: NTTField, C>(
     let bias = packed_monomial::nand_lut::<F>(cfg.n, 1).map_err(convert)?[0];
     target[cfg.n] = b - acc[cfg.n] - bias;
     Ok((
-        PackedTable::new(pp.num_vars(), pp.width(), mask).map_err(convert)?,
-        PackedTable::new(pp.num_vars(), pp.width(), target).map_err(convert)?,
+        PackedTable::new(num_vars, width, mask).map_err(convert)?,
+        PackedTable::new(num_vars, width, target).map_err(convert)?,
     ))
 }
 fn extraction_shape<F: NTTField, C>(pp: &Parameters<C>) -> PackedShape<F> {
+    extraction_shape_dimensions(pp.num_vars(),pp.width())
+}
+fn extraction_shape_dimensions<F:NTTField>(num_vars:usize,width:usize)->PackedShape<F>{
     PackedShape {
-        num_vars: pp.num_vars(),
-        width: pp.width(),
+        num_vars: num_vars,
+        width: width,
         num_factors: 3,
         terms: vec![(F::one(), vec![0, 1]), (-F::one(), vec![2])],
     }
 }
 fn product_shape<F: NTTField, C>(pp: &Parameters<C>, d: usize) -> PackedShape<F> {
+    product_shape_dimensions(pp.num_vars(),pp.width(),d)
+}
+fn product_shape_dimensions<F:NTTField>(num_vars:usize,width:usize,d:usize)->PackedShape<F>{
     let mut terms = (0..d)
         .map(|i| (F::one(), vec![2 * i, 2 * i + 1]))
         .collect::<Vec<_>>();
     terms.push((-F::one(), vec![2 * d]));
     PackedShape {
-        num_vars: pp.num_vars(),
-        width: pp.width(),
+        num_vars: num_vars,
+        width: width,
         num_factors: 2 * d + 1,
         terms,
     }

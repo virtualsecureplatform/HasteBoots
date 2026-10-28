@@ -7,6 +7,13 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+The native final key-switch stage now composes canonical NTTs, original-key
+products, canonical negative-a digits and original output extraction. A fresh
+known-table opening binds the randomized public-input root that the verifier
+cannot deterministically recompute. See `canonical-packed-key-switch.md`.
+Complete masked PBS composition and the original security/performance gates
+remain open.
+
 Canonical radix decomposition now composes retained source/digit roots,
 canonical reconstruction/borrow-endpoint checks and extension-field transition
 lookups, with explicit trusted borrow/helper budgets across adjacent limbs. See

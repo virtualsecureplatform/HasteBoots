@@ -79,6 +79,15 @@ where
     .unwrap();
     let verifier = owner.verifier();
     setup::validate::<F, Sha256, _>(&pp, &verifier).unwrap();
+    assert_eq!(
+        owner.switching_key().expected().roots().len(),
+        setup::switching_key(&verifier).roots().len()
+    );
+    assert_eq!(
+        owner.switching_key().expected().roots()[0].root,
+        setup::switching_key(&verifier).roots()[0].root
+    );
+
     let expected_br = bk::tables(2, 32, &br).unwrap();
     let expected_ks: Vec<_> = ks[0]
         .iter()

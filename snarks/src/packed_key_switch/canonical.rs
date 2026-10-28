@@ -96,3 +96,6 @@ where
         marker: std::marker::PhantomData,
     })
 }
+
+/// Complete final-stage proof composition over retained canonical backend roots.
+pub mod protocol;
