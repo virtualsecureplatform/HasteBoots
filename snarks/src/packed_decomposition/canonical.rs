@@ -75,27 +75,16 @@ where
     );
     Ok(())
 }
-/// Prove exact integer digits from original retained source states.
-/// Borrow parameters cover one linear opening and one/two adjacent comparisons;
-/// reciprocal helper parameters cover two openings per independently committed root.
-pub fn prove<F, EF, H, P, R>(
-    trans: &mut Transcript<F>,
+fn borrow_tables<F, H, P>(
     config: &Config,
     source: &CanonicalProverOracle<'_, F, H, P>,
-    borrow: &P,
-    helper: &P,
     digits: &[&CanonicalProverOracle<'_, F, H, P>],
-    rng: &mut R,
-) -> Result<Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>, Error>
+) -> Result<Vec<PackedTable<F>>, Error>
 where
-    F: PrimeField + Serialize,
-    EF: AbstractExtensionField<F> + Serialize,
+    F: PrimeField,
     H: Hash + Send + Sync,
     P: CanonicalPcs<F, H>,
-    R: Rng + CryptoRng,
 {
-    let public: Vec<_> = digits.iter().map(|d| d.verifier()).collect();
-    bind::<F, EF, H, P>(trans, config, &source.verifier(), borrow, helper, &public)?;
     let pp = source.parameters;
     let d = config.num_digits::<F>()?;
     for s in std::iter::once(source).chain(digits.iter().copied()) {
@@ -127,12 +116,37 @@ where
             return Err(error("digit string is not below the modulus"));
         }
     }
-    let (borrow_commitments, states): (Vec<_>, Vec<_>) = borrows
+    borrows
         .into_iter()
-        .map(|v| {
-            let table = PackedTable::new(pp.num_vars(), pp.width(), v).map_err(convert)?;
-            borrow.commit(&table, rng).map_err(convert)
-        })
+        .map(|v| PackedTable::new(pp.num_vars(), pp.width(), v).map_err(convert))
+        .collect()
+}
+
+/// Prove exact integer digits from original retained source states.
+/// Borrow parameters cover one linear opening and one/two adjacent comparisons;
+/// reciprocal helper parameters cover two openings per independently committed root.
+pub fn prove<F, EF, H, P, R>(
+    trans: &mut Transcript<F>,
+    config: &Config,
+    source: &CanonicalProverOracle<'_, F, H, P>,
+    borrow: &P,
+    helper: &P,
+    digits: &[&CanonicalProverOracle<'_, F, H, P>],
+    rng: &mut R,
+) -> Result<Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>, Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    R: Rng + CryptoRng,
+{
+    let public: Vec<_> = digits.iter().map(|d| d.verifier()).collect();
+    bind::<F, EF, H, P>(trans, config, &source.verifier(), borrow, helper, &public)?;
+    let columns = borrow_tables::<F, H, P>(config, source, digits)?;
+    let (borrow_commitments, states): (Vec<_>, Vec<_>) = columns
+        .into_iter()
+        .map(|table| borrow.commit(&table, rng).map_err(convert))
         .collect::<Result<Vec<_>, Error>>()?
         .into_iter()
         .unzip();
@@ -245,3 +259,6 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) mod audit;
+
+#[cfg(test)]
+mod wire_tests;
