@@ -1,6 +1,8 @@
 use super::*;
 use crate::packed_decomposition::canonical as per_limb;
+use crate::packed_decomposition::canonical::shared as shared_radix;
 use crate::packed_key_switch::canonical::protocol as per_limb_key;
+use crate::packed_key_switch::canonical::protocol::shared as shared_key;
 pub(super) trait Mode {
     const VERSION: u32;
     const DOMAIN: &'static [u8];
@@ -125,4 +127,11 @@ backend!(
     per_limb_key,
     super::PROTOCOL_VERSION,
     b"HasteBoots complete canonical-backend binary NAND PBS v10"
+);
+backend!(
+    Shared,
+    shared_radix,
+    shared_key,
+    11,
+    b"HasteBoots complete canonical-backend binary NAND PBS v11"
 );

@@ -97,3 +97,7 @@ sizes are 17,508,971 bytes (BabyBear/sextic) and 12,459,125 bytes
 legacy full binding cases retain six accepted controls and fifty-four rejected
 attacks. The locked workspace check passes. Logs, checked records and validated
 sources are under `target/performance/complete-canonical-backend-pbs-v10/`.
+
+A separate version-11 shared-comparison entry point is now available; see
+`canonical-shared-complete-pbs.md`. The version-10 entry point remains compatible
+and retains frozen complete serialized certificate controls over both fields.

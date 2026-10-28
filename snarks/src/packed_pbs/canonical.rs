@@ -704,3 +704,6 @@ where
 
 #[cfg(test)]
 mod audit;
+
+/// Complete version-11 PBS with shared canonical comparisons.
+pub mod shared;

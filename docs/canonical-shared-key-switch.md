@@ -29,9 +29,8 @@ These per-role query counts are independent of comparison repetitions; helper
 root count still grows with digit count times repetitions. Trusted callers must
 provision the whole retained key lifetime, and failures do not refund openings.
 
-This is a final-stage entry point, not a new complete-PBS wire version. The old
-complete version-10 PBS path remains available. Shared-final-stage/full-PBS
-integration, genuine 1/4/16 joint aggregation, original-size measurements, general
+This final-stage entry point is integrated into complete version-11 PBS. The old
+complete version-10 PBS path remains available. Genuine 1/4/16 joint aggregation, original-size measurements, general
 hiding, robust vector proximity, knowledge/Fiat-Shamir composition and the
 original matched-security size/latency promotion gates remain open. Shared
 comparisons retain public algebra and do not establish zero knowledge.
@@ -79,3 +78,7 @@ Validation passes 78 default release/locked SNARK unit tests, nine sumcheck
 tests, four existing final-stage integration tests, two frozen wire controls and
 four new shared-stage integration tests: 97 unique tests. The 30 expensive
 complete masked audits remain opt-in. The locked workspace check passes.
+
+Complete version-11 integration is now available through
+`packed_pbs::canonical::shared`; see `canonical-shared-complete-pbs.md` for its
+validation and remaining security/performance gates.

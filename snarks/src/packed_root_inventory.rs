@@ -200,3 +200,53 @@ pub fn canonical_inventory<F: Field, EF: Field, O, S, B>(
         ]),
     }
 }
+
+/// Version-11 declared root slots after verification; not a security bound.
+pub fn canonical_shared_inventory<F: Field, EF: Field, O, S, B>(
+    proof: &packed_pbs::canonical::shared::Proof<F, EF, O, S, B>,
+) -> RootInventory {
+    RootInventory {
+        categories: BTreeMap::from([
+            ("coefficients", proof.coefficients.len()),
+            ("evaluations", proof.evaluations.len()),
+            ("decomposition_inputs", proof.decomposition_inputs.len()),
+            ("accumulators", proof.accumulators.len()),
+            (
+                "decomposition_borrows",
+                proof
+                    .decomposition
+                    .iter()
+                    .map(|d| d.borrow_commitments.len())
+                    .sum(),
+            ),
+            (
+                "decomposition_reciprocals",
+                proof
+                    .decomposition
+                    .iter()
+                    .map(|d| d.comparisons.helper_roots.len())
+                    .sum(),
+            ),
+            ("monomial_evaluations", proof.monomial.evaluations.len()),
+            (
+                "key_switch_coefficients",
+                proof.key_switch.coefficients.len(),
+            ),
+            ("key_switch_evaluations", proof.key_switch.evaluations.len()),
+            ("key_switch_input", 1),
+            (
+                "key_switch_borrows",
+                proof.key_switch.decomposition.borrow_commitments.len(),
+            ),
+            (
+                "key_switch_reciprocals",
+                proof
+                    .key_switch
+                    .decomposition
+                    .comparisons
+                    .helper_roots
+                    .len(),
+            ),
+        ]),
+    }
+}

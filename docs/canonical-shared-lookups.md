@@ -31,8 +31,8 @@ The standalone canonical lookups, legacy shared/deferred protocols and complete
 version-10 PBS format remain available unchanged. Canonical radix decomposition
 now has a shared-comparison entry point; see
 `canonical-shared-decomposition.md`. A shared final key-switch entry point is
-documented in `canonical-shared-key-switch.md`; complete-PBS integration remains
-open. Memory grows
+documented in `canonical-shared-key-switch.md`; complete version-11 PBS now
+integrates this component. Memory grows
 with the number of reciprocal helpers; callers must bound native-size groups.
 The masked adapter still emits independent child PCS proofs. Shared algebra
 and fewer queries do not establish genuine 1/4/16 joint aggregation. Public
@@ -77,3 +77,7 @@ The locked workspace check passes.
 
 The validation archive is `target/performance/canonical-shared-lookups/`, including
 checked records, release/locked test logs, workspace check and exact sources.
+
+Complete version-11 integration is now available through
+`packed_pbs::canonical::shared`; see `canonical-shared-complete-pbs.md` for its
+validation and remaining security/performance gates.

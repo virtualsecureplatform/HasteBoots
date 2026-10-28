@@ -7,23 +7,31 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Complete canonical PBS version 11 now composes shared comparisons in both
+blind-rotation halves and final key switching, with its own trusted entry point
+and parent domain. Version 10 retains its proof spelling and frozen complete
+wire bytes. See `canonical-shared-complete-pbs.md`. Fresh complete version-11
+adversarial audits, native resource/performance validation, genuine joint
+aggregation and the original security/promotion gates remain open.
+
 Canonical final key switching now has an explicit shared-comparison entry point,
 retaining known-input authentication, native key products, NTTs and original
 output extraction. The old per-limb spelling keeps its serialized format. See
-`canonical-shared-key-switch.md`. Complete-PBS integration and the original
-security/performance gates remain open.
+`canonical-shared-key-switch.md`. Version 11 integrates this component; the
+original security/performance gates remain open.
 
 Canonical radix decomposition now groups all limb comparisons through one shared
 lookup point while retaining separate reconstruction and borrow-endpoint checks.
 Source/digit/borrow roots keep their original retained sessions. See
 `canonical-shared-decomposition.md`. The shared final key-switch component now
-uses this path; complete-PBS integration and the original security/performance gates remain open.
+uses this path, and version 11 integrates it into complete PBS. The original
+security/performance gates remain open.
 
 Canonical shared-query extension lookups now support retained masked and ordinary
 source sessions, independent batched scalar equations and one terminal query per
 used root. Aliased slots reuse a checked claim; unused slots spend no allowance.
-See `canonical-shared-lookups.md`. Complete-PBS integration, genuine joint
-aggregation and the original security/performance gates remain open.
+See `canonical-shared-lookups.md`. Version 11 integrates these comparisons;
+genuine joint aggregation and the original security/performance gates remain open.
 
 Fresh complete v10 key-product, linkage, rotation, extraction and canonicity
 certificates pass strict child and actual-root replay on both backends and

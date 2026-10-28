@@ -32,8 +32,8 @@ does not refund earlier openings.
 The new path uses public linear and sumcheck algebra. The masked PCS does not
 make it a hiding proof, and per-root packets are not genuine joint aggregation.
 The canonical final key-switch stage now has a shared-comparison entry point;
-see `canonical-shared-key-switch.md`. Complete-PBS integration, native-size
-measurements, robust
+see `canonical-shared-key-switch.md`. Complete version-11 PBS now uses this
+component. Native-size measurements, robust
 vector proximity, adaptive hiding, knowledge/Fiat-Shamir composition and the
 original security/performance promotion gates remain open. Helper memory grows
 with the number of limbs and repetitions; native callers must bound groups.
@@ -80,3 +80,7 @@ All 78 default release/locked SNARK unit tests and nine sumcheck tests pass
 workspace check passes. Frozen wire records, checked comparisons, test logs,
 pre-refactor sources and the validated final source snapshot are archived in
 the evidence directory above.
+
+Complete version-11 integration is now available through
+`packed_pbs::canonical::shared`; see `canonical-shared-complete-pbs.md` for its
+validation and remaining security/performance gates.
