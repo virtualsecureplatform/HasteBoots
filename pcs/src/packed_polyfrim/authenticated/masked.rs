@@ -5,6 +5,9 @@
 #[cfg(test)]
 mod disclosure;
 
+/// Ordered batches with one shared original-source proximity certificate.
+pub mod joint;
+
 use super::*;
 use algebra::matrix_weighted::{Matrix, PackedTable};
 use rand::{CryptoRng, Rng};
@@ -289,16 +292,47 @@ fn split<F: Field + Serialize, H: Hash + Send + Sync>(
         },
     )
 }
-/// Open under the original matrix query and expected claim. Invalid statements,
-/// parameters and exhausted sessions reject before transcript mutation. Once
-/// preflight succeeds the allowance is spent even if later proving fails.
-pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
-    t: &mut Transcript<F>,
+/// Query-specific masked ladder authentication, used by joint-source batches.
+/// This packet is verified only together with its batch source certificate.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResponseProof<F, O> {
+    /// Monotone private-session index; one allowance per query remains charged.
+    pub index: usize,
+    /// Canonical response of the independent mask polynomial.
+    pub mask_claim: Vec<F>,
+    /// Query-specific masked consistency and projected proximity.
+    pub inner: proximity::Proof<F, O>,
+    /// Original paired-source paths for the query-specific virtual source.
+    pub sources: Vec<Pair<F, O>>,
+}
+struct ResponseRef<'a, F, O> {
+    index: usize,
+    mask_claim: &'a [F],
+    inner: &'a proximity::Proof<F, O>,
+    sources: &'a [Pair<F, O>],
+}
+impl<F, O> ResponseProof<F, O> {
+    fn as_ref(&self) -> ResponseRef<'_, F, O> {
+        ResponseRef {
+            index: self.index,
+            mask_claim: &self.mask_claim,
+            inner: &self.inner,
+            sources: &self.sources,
+        }
+    }
+}
+struct Prepared<F> {
+    query: Vec<MatrixPair<F>>,
+    claim: Vec<F>,
+    padded: Vec<MatrixPair<F>>,
+    mask_claim: Vec<F>,
+}
+fn prepare<F: Field + Serialize, H: Hash + Send + Sync>(
     pp: &Parameters<F>,
-    session: &mut ProverSession<F, H>,
+    session: &ProverSession<F, H>,
     query: &[MatrixPair<F>],
     claim: &[F],
-) -> Result<Proof<F, H::Output>, Error> {
+) -> Result<Prepared<F>, Error> {
     if session.context != hash::<H, _>(&(b"masked packed PolyFRIM parameters v2".as_slice(), pp))
         || session.spent >= pp.max_openings
     {
@@ -313,11 +347,37 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
         return Err(Error("false masked source claim"));
     }
     let mask_claim = lane_response(&session.source.polynomial, pp.width, pp.width, query)?;
-    let mask_claim: Vec<_> = mask_claim.into_iter().map(Field::canonicalized).collect();
-    let index = session.spent;
-    session.spent += 1;
-    let alpha = bind(t, pp, &session.root(), index, query, claim, &mask_claim);
-    let (source_proximity, source_pairs) = source_prove::<F, H>(t, pp, &session.source, index)?;
+    let mask_claim = mask_claim.into_iter().map(Field::canonicalized).collect();
+    Ok(Prepared {
+        query: canonical_query,
+        claim: canonical_claim,
+        padded,
+        mask_claim,
+    })
+}
+// A statically selected source step preserves the old transcript sequence while
+// the joint entry point authenticates that source once before all responses.
+fn prove_response<F: Field + Serialize, H: Hash + Send + Sync, S>(
+    t: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    session: &ProverSession<F, H>,
+    index: usize,
+    prepared: Prepared<F>,
+    source_step: impl FnOnce(
+        &mut Transcript<F>,
+        &Parameters<F>,
+        &super::State<F, H>,
+        usize,
+    ) -> Result<S, Error>,
+) -> Result<(S, ResponseProof<F, H::Output>), Error> {
+    let Prepared {
+        query,
+        claim,
+        padded,
+        mask_claim,
+    } = prepared;
+    let alpha = bind(t, pp, &session.root(), index, &query, &claim, &mask_claim);
+    let source = source_step(t, pp, &session.source, index)?;
     let identifier = identifier::<F, H>(pp, &session.root(), index, alpha);
     let coefficients = session
         .source
@@ -374,13 +434,38 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
             }
         })
         .collect();
+    Ok((
+        source,
+        ResponseProof {
+            index,
+            mask_claim,
+            inner,
+            sources,
+        },
+    ))
+}
+/// Open under the original matrix query and expected claim. Invalid statements,
+/// parameters and exhausted sessions reject before transcript mutation. Once
+/// preflight succeeds the allowance is spent even if later proving fails.
+pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
+    t: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    session: &mut ProverSession<F, H>,
+    query: &[MatrixPair<F>],
+    claim: &[F],
+) -> Result<Proof<F, H::Output>, Error> {
+    let prepared = prepare(pp, session, query, claim)?;
+    let index = session.spent;
+    session.spent += 1;
+    let ((source_proximity, source_pairs), response) =
+        prove_response(t, pp, session, index, prepared, source_prove::<F, H>)?;
     Ok(Proof {
-        index,
-        mask_claim,
+        index: response.index,
+        mask_claim: response.mask_claim,
         source_proximity,
         source_pairs,
-        inner,
-        sources,
+        inner: response.inner,
+        sources: response.sources,
     })
 }
 /// Stateless cryptographic check; applications requiring ordered acceptance use
@@ -393,14 +478,42 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
     claim: &[F],
     proof: &Proof<F, H::Output>,
 ) -> Result<(), Error> {
-    let (canonical_query, canonical_claim) = canonical_public(pp, query, claim)?;
-    let query = canonical_query.as_slice();
-    let claim = canonical_claim.as_slice();
-    let padded = padded_query(pp, query, claim)?;
+    let (query, claim) = canonical_public(pp, query, claim)?;
+    if proof.source_pairs.len() != pp.queries {
+        return Err(Error("masked proof index or shape"));
+    }
+    let response = ResponseRef {
+        index: proof.index,
+        mask_claim: &proof.mask_claim,
+        inner: &proof.inner,
+        sources: &proof.sources,
+    };
+    validate_response(pp, &response)?;
+    if proof
+        .source_pairs
+        .iter()
+        .any(|p| p.values.iter().any(|v| !v.is_canonical()))
+    {
+        return Err(Error("noncanonical masked field encoding"));
+    }
+    verify_response::<F, H>(t, pp, source, &query, &claim, response, |t| {
+        source_verify::<F, H>(
+            t,
+            pp,
+            source,
+            proof.index,
+            &proof.source_proximity,
+            &proof.source_pairs,
+        )
+    })
+}
+fn validate_response<F: Field, O>(
+    pp: &Parameters<F>,
+    proof: &ResponseRef<'_, F, O>,
+) -> Result<(), Error> {
     if proof.index >= pp.max_openings
         || proof.mask_claim.len() != pp.width
         || proof.sources.len() != 2 * pp.queries
-        || proof.source_pairs.len() != pp.queries
     {
         return Err(Error("masked proof index or shape"));
     }
@@ -408,24 +521,28 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
         || proof
             .sources
             .iter()
-            .chain(&proof.source_pairs)
             .any(|p| p.values.iter().any(|v| !v.is_canonical()))
     {
         return Err(Error("noncanonical masked field encoding"));
     }
-    let alpha = bind(t, pp, source, proof.index, query, claim, &proof.mask_claim);
-    source_verify::<F, H>(
-        t,
-        pp,
-        source,
-        proof.index,
-        &proof.source_proximity,
-        &proof.source_pairs,
-    )?;
+    Ok(())
+}
+fn verify_response<F: Field + Serialize, H: Hash + Send + Sync>(
+    t: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    source: &H::Output,
+    query: &[MatrixPair<F>],
+    claim: &[F],
+    proof: ResponseRef<'_, F, H::Output>,
+    source_step: impl FnOnce(&mut Transcript<F>) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let padded = padded_query(pp, query, claim)?;
+    let alpha = bind(t, pp, source, proof.index, query, claim, proof.mask_claim);
+    source_step(t)?;
     let identifier = identifier::<F, H>(pp, source, proof.index, alpha);
     let combined: Vec<_> = claim
         .iter()
-        .zip(&proof.mask_claim)
+        .zip(proof.mask_claim)
         .map(|(&p, &s)| (p + alpha * s).canonicalized())
         .collect();
     let wide = pp.oracle(true);
@@ -436,7 +553,7 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
         &identifier,
         &padded,
         &combined,
-        &proof.inner,
+        proof.inner,
         true,
         |index, virtual_pair| {
             let opening = proof
