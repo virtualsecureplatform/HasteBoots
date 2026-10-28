@@ -19,6 +19,8 @@ use sumcheck::{
 
 /// Experimental shared PCS authentication of all relation factor values.
 pub mod aggregate;
+/// Shared-challenge independent relations with one joint PCS authentication.
+pub mod batch;
 
 /// Failure while packing rows, proving or verifying an authenticated relation.
 #[derive(Debug, thiserror::Error)]
