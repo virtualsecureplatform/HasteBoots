@@ -7,6 +7,14 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Single polynomial-relation authentication now has a canonical backend entry
+point. It borrows retained source tables, binds every ordered parameter context
+and root before ZeroCheck, and preserves legacy framing through typed wrappers.
+Both fields pass decoded masked proofs, frozen legacy wire controls and fresh
+false-relation certificates with genuine source openings. See
+`canonical-packed-relation.md`. Shared/batched relations, setup ownership and
+whole-proof security remain open.
+
 Packed NTT source authentication now dispatches through the canonical backend
 boundary. Shared shape logic retains the original logical transform dimensions;
 masked physical padding cannot silently change them. Eight legacy byte/transcript

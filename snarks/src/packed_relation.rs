@@ -7,7 +7,7 @@
 use algebra::{PrimeField, matrix_weighted::PackedTable};
 use helper::{FiatShamirTranscript, Transcript};
 use pcs::{
-    matrix_weighted::{Commitment, Opening, Parameters, State},
+    matrix_weighted::{Commitment, Opening, Parameters, State, backend::CanonicalPcs},
     utils::{code::RowCode, hash::Hash},
 };
 use serde::{Deserialize, Serialize};
@@ -40,15 +40,17 @@ pub struct ProverStatistics {
 
 /// Complete proof of one committed vector relation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RelationProof<F, O> {
+pub struct CanonicalRelationProof<F, P> {
     /// ZeroCheck proof, excluding the matrix-weighted commitment openings.
     pub zero: ZeroProof<F>,
     /// Claimed terminal vector for every committed factor.
     pub values: Vec<Vec<F>>,
     /// Authentication of each terminal vector against its supplied commitment.
-    pub openings: Vec<Opening<F, O>>,
+    pub openings: Vec<P>,
 }
 
+/// Legacy Brakedown relation spelling and unchanged single-opening layout.
+pub type RelationProof<F, O> = CanonicalRelationProof<F, Opening<F, O>>;
 /// Pack distinct consecutive rows into lanes, padding to a Boolean domain.
 /// Every term must contain a factor so all-zero padding satisfies the relation.
 pub fn pack_rows<F: PrimeField>(
@@ -266,28 +268,130 @@ where
     if states.len() != shape.num_factors || commitments.len() != shape.num_factors {
         return Err(Error("incorrect factor commitment count".into()));
     }
-    trans.append_message(b"HasteBoots packed relation v1", &(shape, commitments));
+    let public: Vec<_> = commitments
+        .iter()
+        .map(|commitment| crate::packed_oracle::CanonicalVerifierOracle {
+            parameters,
+            commitment,
+        })
+        .collect();
+    prove_inner::<F, H, Parameters<C>>(trans, shape, &public, factors, states, statistics, true)
+}
+/// Prove a polynomial identity from actual retained canonical source tables.
+/// The entire original witness is borrowed; no extra source view is committed.
+pub fn prove_canonical<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &PackedShape<F>,
+    sources: &[&crate::packed_oracle::CanonicalProverOracle<'_, F, H, P>],
+    statistics: &mut ProverStatistics,
+) -> Result<CanonicalRelationProof<F, P::SingleProof>, Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    let public: Vec<_> = sources.iter().map(|s| s.verifier()).collect();
+    let tables: Vec<_> = sources.iter().map(|s| s.table()).collect();
+    let states: Vec<_> = sources.iter().map(|s| s.state).collect();
+    prove_inner::<F, H, P>(trans, shape, &public, &tables, &states, statistics, false)
+}
+fn canonical_shape<F, H, P>(shape: &PackedShape<F>, parameters: &P) -> PackedShape<F>
+where
+    F: PrimeField,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    let coefficients = parameters.normalize_values(shape.terms.iter().map(|(a, _)| *a).collect());
+    PackedShape {
+        num_vars: shape.num_vars,
+        width: shape.width,
+        num_factors: shape.num_factors,
+        terms: coefficients
+            .into_iter()
+            .zip(shape.terms.iter().map(|(_, indices)| indices.clone()))
+            .collect(),
+    }
+}
+fn bind_sources<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &PackedShape<F>,
+    sources: &[crate::packed_oracle::CanonicalVerifierOracle<'_, H::Output, P>],
+    legacy_wire: bool,
+) -> Result<(), Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    shape.validate().map_err(convert)?;
+    if sources.len() != shape.num_factors
+        || sources.is_empty()
+        || sources.iter().any(|s| {
+            s.parameters.num_vars() != shape.num_vars || s.parameters.width() != shape.width
+        })
+    {
+        return Err(Error("relation source dimensions".into()));
+    }
+    let roots: Vec<_> = sources.iter().map(|s| s.commitment).collect();
+    if legacy_wire {
+        trans.append_message(b"HasteBoots packed relation v1", &(shape, roots));
+    } else {
+        let contexts: Vec<_> = sources
+            .iter()
+            .map(|s| s.parameters.context().map_err(convert))
+            .collect::<Result<_, _>>()?;
+        trans.append_message(P::RELATION_DOMAIN, &(shape, contexts, roots));
+    }
+    Ok(())
+}
+fn prove_inner<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &PackedShape<F>,
+    sources: &[crate::packed_oracle::CanonicalVerifierOracle<'_, H::Output, P>],
+    factors: &[impl std::borrow::Borrow<PackedTable<F>> + Sync],
+    states: &[&P::State],
+    statistics: &mut ProverStatistics,
+    legacy_wire: bool,
+) -> Result<CanonicalRelationProof<F, P::SingleProof>, Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    if sources.is_empty() || states.len() != shape.num_factors {
+        return Err(Error("incorrect factor commitment count".into()));
+    }
+    let normalized =
+        (!legacy_wire).then(|| canonical_shape::<F, H, P>(shape, sources[0].parameters));
+    let shape = normalized.as_ref().unwrap_or(shape);
+    bind_sources::<F, H, P>(trans, shape, sources, legacy_wire)?;
     let timer = Instant::now();
     let (zero, subclaim, values) =
-        packed_zero::prove_with_terminal_values(trans, shape, factors).map_err(convert)?;
+        packed_zero::prove_with_borrowed_terminal_values(trans, shape, factors).map_err(convert)?;
     statistics.zero_check += timer.elapsed();
     let timer = Instant::now();
+    let values: Vec<_> = sources
+        .iter()
+        .zip(values)
+        .map(|(s, v)| s.parameters.normalize_values(v))
+        .collect();
     subclaim.check(shape, &values).map_err(convert)?;
     statistics.terminal_evaluation += timer.elapsed();
     trans.append_message(b"packed relation terminal values", &values);
     let timer = Instant::now();
-    let openings = commitments
+    let openings = sources
         .iter()
         .zip(states)
         .zip(&values)
-        .map(|((commitment, state), value)| {
-            parameters
-                .open::<F, H>(trans, commitment, state, &subclaim.query, value)
+        .map(|((source, state), value)| {
+            source
+                .parameters
+                .open(trans, source.commitment, state, &subclaim.query, value)
                 .map_err(convert)
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<_, _>>()?;
     statistics.openings += timer.elapsed();
-    Ok(RelationProof {
+    Ok(CanonicalRelationProof {
         zero,
         values,
         openings,
@@ -307,8 +411,51 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
+    let sources: Vec<_> = commitments
+        .iter()
+        .map(|commitment| crate::packed_oracle::CanonicalVerifierOracle {
+            parameters,
+            commitment,
+        })
+        .collect();
+    verify_inner::<F, H, Parameters<C>>(trans, shape, &sources, proof, true)
+}
+/// Authenticate every canonical factor terminal and check the polynomial identity.
+pub fn verify_canonical<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &PackedShape<F>,
+    sources: &[crate::packed_oracle::CanonicalVerifierOracle<'_, H::Output, P>],
+    proof: &CanonicalRelationProof<F, P::SingleProof>,
+) -> Result<(), Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    verify_inner::<F, H, P>(trans, shape, sources, proof, false)
+}
+fn verify_inner<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &PackedShape<F>,
+    sources: &[crate::packed_oracle::CanonicalVerifierOracle<'_, H::Output, P>],
+    proof: &CanonicalRelationProof<F, P::SingleProof>,
+    legacy_wire: bool,
+) -> Result<(), Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    if sources.is_empty() {
+        return Err(Error(
+            "incorrect factor commitment/opening dimensions".into(),
+        ));
+    }
+    let normalized =
+        (!legacy_wire).then(|| canonical_shape::<F, H, P>(shape, sources[0].parameters));
+    let shape = normalized.as_ref().unwrap_or(shape);
     shape.validate().map_err(convert)?;
-    if commitments.len() != shape.num_factors
+    if sources.len() != shape.num_factors
         || proof.values.len() != shape.num_factors
         || proof.openings.len() != shape.num_factors
         || proof.values.iter().any(|v| v.len() != shape.width)
@@ -317,14 +464,17 @@ where
             "incorrect factor commitment/opening dimensions".into(),
         ));
     }
-    trans.append_message(b"HasteBoots packed relation v1", &(shape, commitments));
+    for (source, value) in sources.iter().zip(&proof.values) {
+        source.parameters.validate_values(value).map_err(convert)?;
+    }
+    bind_sources::<F, H, P>(trans, shape, sources, legacy_wire)?;
     let subclaim = packed_zero::verify(trans, shape, &proof.zero).map_err(convert)?;
     subclaim.check(shape, &proof.values).map_err(convert)?;
     trans.append_message(b"packed relation terminal values", &proof.values);
-    for ((commitment, value), opening) in commitments.iter().zip(&proof.values).zip(&proof.openings)
-    {
-        parameters
-            .verify::<F, H>(trans, commitment, &subclaim.query, value, opening)
+    for ((source, value), opening) in sources.iter().zip(&proof.values).zip(&proof.openings) {
+        source
+            .parameters
+            .verify(trans, source.commitment, &subclaim.query, value, opening)
             .map_err(convert)?;
     }
     Ok(())

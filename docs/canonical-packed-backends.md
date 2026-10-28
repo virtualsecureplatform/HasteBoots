@@ -71,3 +71,8 @@ NTT authentication now uses the same boundary with backend-specific ordered
 opening packets and a shared logical shape calculation. Eight frozen legacy
 controls and fresh masked transform checks are described in
 `canonical-packed-ntt.md`. Complete-PBS backend integration is still unfinished.
+
+Single polynomial relations now use canonical source descriptors and borrowed
+ZeroCheck factors. Contexts and roots are bound before algebra; legacy callers
+retain their original framing. See `canonical-packed-relation.md`. Shared/batched
+relations and complete-PBS setup integration remain outstanding.
