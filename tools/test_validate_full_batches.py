@@ -39,6 +39,22 @@ class AggregateValidationTests(unittest.TestCase):
         rows[0]["hadamard_backend"]="independent"
         with self.assertRaises(ValueError):validate(encode(layouts,rows),"goldilocks",aggregate_hadamard=True)
 
+    def test_version_five_requires_explicit_deferred_mode(self):
+        layouts,rows=batch_fixture("goldilocks")
+        for row in rows:
+            row.update(protocol_version=5,transcript="merlin-direct-aggregated-hadamard-deferred-lookup-sources-v1",
+                       hadamard_backend="multi-root",lookup_backend="deferred-extension")
+        result=validate(encode(layouts,rows),"goldilocks",aggregate_hadamard=True,defer_lookup_sources=True)
+        self.assertEqual(result["proofs"],21)
+        self.assertTrue(result["defer_lookup_sources"])
+        self.assertIn("per-decomposition deferred",result["scope"])
+        self.assertIn("no cross-statement aggregation",result["scope"])
+        for options in [{},{"aggregate_hadamard":True},{"defer_lookup_sources":True},
+                        {"aggregate_hadamard":True,"defer_lookup_sources":1}]:
+            with self.assertRaises(ValueError):validate(encode(layouts,rows),"goldilocks",**options)
+        rows[0]["lookup_backend"]="extension"
+        with self.assertRaises(ValueError):validate(encode(layouts,rows),"goldilocks",aggregate_hadamard=True,defer_lookup_sources=True)
+
 
 class BatchValidationTests(unittest.TestCase):
     def test_shifted_lane_baseline_joint_bound_and_protocol(self):

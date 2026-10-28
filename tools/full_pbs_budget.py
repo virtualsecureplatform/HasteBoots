@@ -18,7 +18,7 @@ ROLES = ("source", "helper", "final_source", "final_helper")
 def protocol_metadata(record):
     version=record.get("protocol_version",1)
     transcript=record.get("transcript","legacy-aes128-seed" if version==1 else None)
-    known={1:"legacy-aes128-seed",2:"merlin-direct-canonical-rejection-v1",3:"merlin-direct-prime-parent-extension-child-v1",4:"merlin-direct-extension-comparisons-aggregated-hadamard-v1"}
+    known={1:"legacy-aes128-seed",2:"merlin-direct-canonical-rejection-v1",3:"merlin-direct-prime-parent-extension-child-v1",4:"merlin-direct-extension-comparisons-aggregated-hadamard-v1",5:"merlin-direct-aggregated-hadamard-deferred-lookup-sources-v1"}
     if type(version) is not int or version not in known or transcript!=known[version]:
         raise ValueError("unsupported or inconsistent complete proof transcript version")
     return version,transcript
@@ -27,8 +27,8 @@ def protocol_metadata(record):
 def full_bounds(record, layouts):
     version,_ = protocol_metadata(record)
     decomposition_bound = lane_decomposition_component_bounds
-    if version in (3,4):
-        if record.get("lookup_backend") != "extension" or type(record.get("lookup_field_degree")) is not int:
+    if version in (3,4,5):
+        if record.get("lookup_backend") != ("deferred-extension" if version==5 else "extension") or type(record.get("lookup_field_degree")) is not int:
             raise ValueError("extension protocol requires explicit backend and field degree")
         decomposition_bound = extension_decomposition_component_bounds
     names = ("prime", "width", "polynomial_size", "input_dimension", "output_dimension",
@@ -63,7 +63,7 @@ def full_bounds(record, layouts):
     def add(prefix, contributions):
         errors.update({prefix+"_"+name:value for name,value in contributions.items()})
     add("hadamard",component_bounds(dict(source,degree=2,factors=4*digits+1)))
-    if version == 4:
+    if version in (4,5):
         if (record.get("hadamard_backend") != "multi-root" or k < 3
             or source["block_width"] != k
             or source["row_message_scalars"] != k*source["row_message_blocks"]):
@@ -75,6 +75,16 @@ def full_bounds(record, layouts):
         if degree < 1:
             raise ValueError("invalid aggregation field degree")
         errors["hadamard_aggregation_cancellation"]=Fraction(1,p**degree)
+
+    if version==5:
+        # No new algebraic compression: every derived query/value is still
+        # checked. Keep the old per-limb source PCS count as an upper bound
+        # on the <=2*d+1 canonical source packets (previously 3*d).
+        # The fixed-word/shared-column argument requires native unpadded
+        # source geometry, including the final key-switch decomposition.
+        for c in (source,final):
+            if c["block_width"]!=k or c["row_message_scalars"]!=k*c["row_message_blocks"]:
+                raise ValueError("deferred source authentication requires unpadded equal-width block RS")
 
     length,message = source["row_encoded_blocks"],source["row_message_blocks"]
     proximity = (1-Fraction(length-message+1,3*length))**source["queries"]
@@ -90,7 +100,7 @@ def full_bounds(record, layouts):
                 repetitions=reps,tuple_columns=3,linear_checks=2,linear_sources=4*(digits+1),
                 effective_repetitions=((reps+k-1)//k)*k,lookup_groups=(reps+k-1)//k)
     lane.update({"helper_"+n:helper[n] for n in ("variables","row_message_scalars","row_message_blocks","row_encoded_blocks","block_width","queries")})
-    if version in (3,4):
+    if version in (3,4,5):
         lane["lookup_field_degree"] = record["lookup_field_degree"]
     add("decomposition",decomposition_bound(lane))
     queries = row+12
@@ -102,7 +112,7 @@ def full_bounds(record, layouts):
     final_record = dict(final,polynomial_size=size,output_dimension=lwe,basis_bits=ks_bits,
                         digits=((p-1).bit_length()+ks_bits-1)//ks_bits,repetitions=reps)
     final_record.update({"helper_"+n:final_helper[n] for n in ("variables","row_message_scalars","row_message_blocks","row_encoded_blocks","block_width","queries")})
-    if version in (3,4):
+    if version in (3,4,5):
         final_record["lookup_field_degree"] = record["lookup_field_degree"]
     add("key_switch",key_switch_component_bounds(final_record, decomposition_bound=decomposition_bound))
     return errors

@@ -46,6 +46,23 @@ class FullInventoryTests(unittest.TestCase):
         full_bounds(record,alternate)
         with self.assertRaises(ValueError):full_bounds(aggregate,alternate)
 
+    def test_deferred_sources_keep_conservative_per_limb_inventory(self):
+        record,layouts=self.fixture()
+        record.update(protocol_version=4,transcript="merlin-direct-extension-comparisons-aggregated-hadamard-v1",
+                      lookup_backend="extension",lookup_field_degree=6,lookup_repetitions=1,hadamard_backend="multi-root")
+        old=full_bounds(record,layouts)
+        deferred=dict(record,protocol_version=5,lookup_backend="deferred-extension",
+                      transcript="merlin-direct-aggregated-hadamard-deferred-lookup-sources-v1")
+        self.assertEqual(full_bounds(deferred,layouts),old)
+        for change in [dict(lookup_backend="extension"),dict(hadamard_backend="independent"),dict(protocol_version=4),dict(transcript=record["transcript"])]:
+            with self.assertRaises(ValueError):full_bounds(dict(deferred,**change),layouts)
+        padded={k:dict(v) for k,v in layouts.items()}
+        padded["final_source"].update(block_width=32,row_message_blocks=4,row_encoded_blocks=8)
+        # Existing physical padded row geometry is supported by component
+        # bounds, but excluded from this deferred fixed-word inventory.
+        full_bounds(record,padded)
+        with self.assertRaises(ValueError):full_bounds(deferred,padded)
+
     def test_invalid_inventory_or_layout_is_rejected(self):
         record,layouts=self.fixture()
         for change in [dict(ntt_links=8),dict(private_coefficient_roots=17),dict(output_dimension=1024),dict(polynomial_size=2048)]:

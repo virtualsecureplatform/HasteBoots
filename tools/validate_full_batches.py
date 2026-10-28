@@ -11,11 +11,13 @@ import re
 from full_pbs_budget import full_bounds, ROLES
 
 
-def validate(text, field, full=True, profile="standard", aggregate_hadamard=False):
+def validate(text, field, full=True, profile="standard", aggregate_hadamard=False, defer_lookup_sources=False):
     if field not in ("babybear", "goldilocks"):
         raise ValueError("unsupported field")
     if type(aggregate_hadamard) is not bool:
         raise ValueError("aggregation selection must be explicit bool")
+    if type(defer_lookup_sources) is not bool or (defer_lookup_sources and not aggregate_hadamard):
+        raise ValueError("deferred sources require explicit aggregate Hadamard selection")
     gold = field == "goldilocks"
     prime, width, degree, roots = (2**64-2**32+1, 4, 3, 17) if gold else (2013265921, 8, 5, 9)
     if profile not in ("standard", "babybear6-helper1", "babybear8-helper1", "babybear-lanes-helper1") or (profile != "standard" and gold):
@@ -50,9 +52,9 @@ def validate(text, field, full=True, profile="standard", aggregate_hadamard=Fals
     for iteration, ((size, index), row) in enumerate(zip(schedule, rows)):
         left, right = index & 1, (index >> 1) & 1
         expected = dict(kind="complete-binary-nand-pbs", field=field, prime=prime,
-            width=width, lookup_field_degree=degree, lookup_backend="lanes" if lanes else "extension", lookup_repetitions=16 if lanes else 1,
-            protocol_version=4 if aggregate_hadamard else (2 if lanes else 3),
-            transcript="merlin-direct-extension-comparisons-aggregated-hadamard-v1" if aggregate_hadamard else ("merlin-direct-canonical-rejection-v1" if lanes else "merlin-direct-prime-parent-extension-child-v1"),
+            width=width, lookup_field_degree=degree, lookup_backend="deferred-extension" if defer_lookup_sources else ("lanes" if lanes else "extension"), lookup_repetitions=16 if lanes else 1,
+            protocol_version=5 if defer_lookup_sources else (4 if aggregate_hadamard else (2 if lanes else 3)),
+            transcript="merlin-direct-aggregated-hadamard-deferred-lookup-sources-v1" if defer_lookup_sources else "merlin-direct-extension-comparisons-aggregated-hadamard-v1" if aggregate_hadamard else ("merlin-direct-canonical-rejection-v1" if lanes else "merlin-direct-prime-parent-extension-child-v1"),
             verification_scope="complete-serialized-public-verifier", security="experimental-unbudgeted",
             full_parameters=full, seed=42, batch_size=1, iteration=iteration, verified=True,
             polynomial_size=1024 if full else 32, input_dimension=728 if full else 32,
@@ -90,8 +92,8 @@ def validate(text, field, full=True, profile="standard", aggregate_hadamard=Fals
     union = sum(errors, Fraction())
     if helper_extra and union > Fraction(1, 2**128):
         raise ValueError("shifted-helper profile misses 21-proof interactive union threshold")
-    return dict(field=field, profile=profile, aggregate_hadamard=aggregate_hadamard, full_parameters=full, proofs=len(rows), groups=[1, 4, 16],
-        scope=("independent single-PBS proofs with shared preprocessing and within-proof Hadamard aggregation; no cross-statement aggregation or FS certificate" if aggregate_hadamard else "independent single-PBS proofs with shared preprocessing; no aggregation or FS certificate"),
+    return dict(field=field, profile=profile, aggregate_hadamard=aggregate_hadamard, defer_lookup_sources=defer_lookup_sources, full_parameters=full, proofs=len(rows), groups=[1, 4, 16],
+        scope=("independent single-PBS proofs with shared preprocessing, within-proof Hadamard aggregation and per-decomposition deferred lookup source authentication; no cross-statement aggregation or FS certificate" if defer_lookup_sources else "independent single-PBS proofs with shared preprocessing and within-proof Hadamard aggregation; no cross-statement aggregation or FS certificate" if aggregate_hadamard else "independent single-PBS proofs with shared preprocessing; no aggregation or FS certificate"),
         per_proof_interactive_bits=-math.log2(float(max(errors))),
         all_21_interactive_union_bits=-math.log2(float(union)),
         native_keys_sha256=rows[0]["native_keys_sha256"],
@@ -120,10 +122,11 @@ def main():
     parser.add_argument("--toy", action="store_true")
     parser.add_argument("--profile", choices=("standard", "babybear6-helper1", "babybear8-helper1", "babybear-lanes-helper1"), default="standard")
     parser.add_argument("--aggregate-hadamard", action="store_true")
+    parser.add_argument("--defer-lookup-sources", action="store_true")
     parser.add_argument("--reference-log", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    result = validate(args.log.read_text(), args.field, not args.toy, args.profile, args.aggregate_hadamard)
+    result = validate(args.log.read_text(), args.field, not args.toy, args.profile, args.aggregate_hadamard, args.defer_lookup_sources)
     if args.reference_log:
         match_native_reference(result, args.reference_log.read_text())
         result["reference_log_sha256"] = hashlib.sha256(args.reference_log.read_bytes()).hexdigest()
