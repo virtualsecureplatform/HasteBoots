@@ -27,8 +27,16 @@ fn sources<'a, F: Field>(
         .collect();
     (tables, routes)
 }
+// Only immutable arithmetic metadata crosses worker threads. The caller's Rc
+// owners stay on the proving thread; table views contain no reference counts.
+struct Equation<'a, F: Field> {
+    products: &'a [(F, Vec<usize>)],
+    linear_ops: &'a [Vec<(F, F)>],
+    num_variables: usize,
+    max_multiplicands: usize,
+}
 fn message<F: Field>(
-    p: &ListOfProductsOfPolynomials<F>,
+    p: &Equation<'_, F>,
     route: &[usize],
     tables: &[&DenseMultilinearExtension<F>],
     round: usize,
@@ -85,6 +93,15 @@ pub(super) fn prove<F: Field + Serialize>(
     infos: &[PolynomialInfo],
 ) -> Result<(Proof<F>, Vec<ProverState<F>>), Error> {
     let (original, routes) = sources(polynomials);
+    let equations: Vec<_> = polynomials
+        .iter()
+        .map(|p| Equation {
+            products: &p.products,
+            linear_ops: &p.linear_ops,
+            num_variables: p.num_variables,
+            max_multiplicands: p.max_multiplicands,
+        })
+        .collect();
     let mut folded: Option<Vec<DenseMultilinearExtension<F>>> = None;
     let mut point = Vec::with_capacity(infos[0].num_variables);
     let mut instances: Vec<_> = infos
@@ -125,11 +142,23 @@ pub(super) fn prove<F: Field + Serialize>(
         }
         let tables = folded.as_ref().map(|t| t.iter().collect::<Vec<_>>());
         let tables = tables.as_deref().unwrap_or(&original);
-        let messages: Vec<_> = polynomials
-            .iter()
-            .zip(&routes)
-            .map(|(p, route)| message(p, route, tables, round))
-            .collect();
+        // All equations use the previous common point. Compute them in
+        // parallel, then bind the complete ordered vector before the next coin.
+        // Keep tiny tails sequential to avoid scheduling costs per equation.
+        let pairs = 1usize << (infos[0].num_variables - round - 1);
+        let messages: Vec<_> = if equations.len() > 1 && pairs >= 256 {
+            equations
+                .par_iter()
+                .zip(routes.par_iter())
+                .map(|(p, route)| message(p, route, tables, round))
+                .collect()
+        } else {
+            equations
+                .iter()
+                .zip(&routes)
+                .map(|(p, route)| message(p, route, tables, round))
+                .collect()
+        };
         let references: Vec<_> = messages.iter().collect();
         check(&references, &expected)?;
         let r = challenge(trans, round, &references);
@@ -167,7 +196,7 @@ mod tests {
         B: PrimeField + Serialize + From<usize>,
         E: AbstractExtensionField<B> + Serialize,
     >() {
-        for n in [1usize, 3] {
+        for n in [1usize, 3, 10] {
             for count in [1usize, 4, 16] {
                 let shared = Rc::new(DenseMultilinearExtension::from_evaluations_vec(
                     n,
@@ -207,16 +236,27 @@ mod tests {
                 if count > 2 {
                     assert_eq!(routes[0][0], routes[2][0]);
                 }
+                // Independent Boolean-table evaluation, avoiding an O(4^n)
+                // dense point-evaluation loop in the larger parallel fixture.
                 let claims: Vec<_> = polynomials
                     .iter()
                     .map(|p| {
                         (0..1 << n)
                             .map(|b| {
-                                p.evaluate(
-                                    &(0..n)
-                                        .map(|j| E::from_base(B::from((b >> j) & 1)))
-                                        .collect::<Vec<_>>(),
-                                )
+                                p.products
+                                    .iter()
+                                    .zip(&p.linear_ops)
+                                    .map(|((coefficient, indices), ops)| {
+                                        indices.iter().zip(ops).fold(
+                                            *coefficient,
+                                            |v, (&i, &(a, bias))| {
+                                                v * (a * p.flattened_ml_extensions[i].evaluations
+                                                    [b]
+                                                    + bias)
+                                            },
+                                        )
+                                    })
+                                    .fold(E::zero(), |a, b| a + b)
                             })
                             .fold(E::zero(), |a, b| a + b)
                     })
@@ -249,10 +289,22 @@ mod tests {
     }
     #[test]
     fn pooled_matches_independent_babybear() {
-        exercise::<algebra::BabyBear, algebra::BabyBearExtension6>();
+        for threads in [1, 4, 16] {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
+                .install(exercise::<algebra::BabyBear, algebra::BabyBearExtension6>);
+        }
     }
     #[test]
     fn pooled_matches_independent_goldilocks() {
-        exercise::<algebra::Goldilocks, algebra::GoldilocksExtension3>();
+        for threads in [1, 4, 16] {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
+                .install(exercise::<algebra::Goldilocks, algebra::GoldilocksExtension3>);
+        }
     }
 }
