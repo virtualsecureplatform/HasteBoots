@@ -4,14 +4,16 @@
 //! view is committed: deterministic matrix-query maps authenticate those views.
 //! Monomial multiplication, key binding and construction of the public initial
 //! accumulator remain obligations of the enclosing complete PBS protocol.
-use crate::packed_oracle::{ProverOracle, VerifierOracle};
+use crate::packed_oracle::{
+    CanonicalProverOracle, CanonicalVerifierOracle, ProverOracle, VerifierOracle,
+};
 use algebra::{
     PrimeField,
     matrix_weighted::{Matrix, MatrixPair, PackedTable},
 };
 use helper::{FiatShamirTranscript, Transcript};
 use pcs::{
-    matrix_weighted::BatchOpening,
+    matrix_weighted::{BatchOpening, Parameters, backend::CanonicalPcs},
     utils::{code::RowCode, hash::Hash},
 };
 use serde::{Deserialize, Serialize};
@@ -83,9 +85,9 @@ impl Shape {
     fn row_variables(&self) -> usize {
         self.padded_rounds.ilog2() as usize
     }
-    fn validate<C>(&self, pp: &pcs::matrix_weighted::Parameters<C>) -> Result<(), Error> {
-        let expected = self.coefficient_variables(pp.width())? + self.row_variables() + 1;
-        if pp.num_vars() != expected {
+    fn validate_dimensions(&self, num_vars: usize, width: usize) -> Result<(), Error> {
+        let expected = self.coefficient_variables(width)? + self.row_variables() + 1;
+        if num_vars != expected {
             return Err(error("canonical table layout differs from native shape"));
         }
         Ok(())
@@ -93,14 +95,15 @@ impl Shape {
 }
 /// Authentic source values for all fixed query maps and one opening per root.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Proof<F, O> {
+pub struct CanonicalProof<F, P> {
     /// Per-source, per-query terminal vectors. Counts derive from trusted shape.
     pub values: Vec<Vec<Vec<F>>>,
     /// Shared-column openings; no view commitment is accepted.
-    pub openings: Vec<BatchOpening<F, O>>,
+    pub openings: Vec<P>,
 }
-/// Prove linkage against expected initial/final a||b polynomials. Public endpoints
-/// are consumed in equations, not merely hashed into a transcript prefix.
+/// Legacy Brakedown wire spelling.
+pub type Proof<F, O> = CanonicalProof<F, BatchOpening<F, O>>;
+/// Prove linkage against caller-supplied initial/final a||b polynomials.
 pub fn prove<F, H, C>(
     trans: &mut Transcript<F>,
     shape: &Shape,
@@ -114,31 +117,79 @@ where
     C: RowCode<F> + Serialize,
 {
     let public: Vec<_> = sources.iter().map(|s| s.verifier()).collect();
-    let (base, queries) = bind_queries::<F, H, C>(trans, shape, initial, final_acc, &public)?;
+    let tables: Vec<_> = sources.iter().map(|s| s.table).collect();
+    let states: Vec<_> = sources.iter().map(|s| s.state).collect();
+    prove_inner::<F, H, Parameters<C>>(trans, shape, initial, final_acc, &public, &tables, &states)
+}
+/// Prove using the original tables retained by the selected canonical backend.
+pub fn prove_canonical<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &Shape,
+    initial: &[F],
+    final_acc: &[F],
+    sources: &[&CanonicalProverOracle<'_, F, H, P>],
+) -> Result<CanonicalProof<F, P::BatchProof>, Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    let public: Vec<_> = sources.iter().map(|s| s.verifier()).collect();
+    let tables: Vec<_> = sources.iter().map(|s| s.table()).collect();
+    let states: Vec<_> = sources.iter().map(|s| s.state).collect();
+    prove_inner::<F, H, P>(trans, shape, initial, final_acc, &public, &tables, &states)
+}
+fn prove_inner<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &Shape,
+    initial: &[F],
+    final_acc: &[F],
+    sources: &[CanonicalVerifierOracle<'_, H::Output, P>],
+    tables: &[&PackedTable<F>],
+    states: &[&P::State],
+) -> Result<CanonicalProof<F, P::BatchProof>, Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    if sources.len() != SOURCES || tables.len() != SOURCES || states.len() != SOURCES {
+        return Err(error("source count"));
+    }
+    let initial = sources[0].parameters.normalize_values(initial.to_vec());
+    let final_acc = sources[0].parameters.normalize_values(final_acc.to_vec());
+    let (base, queries) =
+        bind_queries_backend::<F, H, P>(trans, shape, &initial, &final_acc, sources)?;
     let mut values = Vec::with_capacity(SOURCES);
-    for (source, queries) in sources.iter().zip(&queries) {
-        source.table.validate().map_err(convert)?;
-        if source.table.width() != source.parameters.width()
-            || source.table.num_vars() != source.parameters.num_vars()
+    for ((source, table), queries) in sources.iter().zip(tables).zip(&queries) {
+        table.validate().map_err(convert)?;
+        if table.width() != source.parameters.width()
+            || table.num_vars() != source.parameters.num_vars()
         {
             return Err(error("private source shape"));
         }
-        values.push(evaluate_many(source.table, queries)?);
+        values.push(
+            evaluate_many(table, queries)?
+                .into_iter()
+                .map(|v| source.parameters.normalize_values(v))
+                .collect(),
+        );
     }
-    check(shape, initial, final_acc, &base, &values)?;
+    check(shape, &initial, &final_acc, &base, &values)?;
     let openings = sources
         .iter()
+        .zip(states)
         .zip(&queries)
         .zip(&values)
-        .map(|((s, q), v)| {
+        .map(|(((s, state), q), v)| {
             s.parameters
-                .open_many::<F, H>(trans, s.commitment, s.state, q, v)
+                .open_many(trans, s.commitment, state, q, v)
                 .map_err(convert)
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Proof { values, openings })
+        .collect::<Result<_, _>>()?;
+    Ok(CanonicalProof { values, openings })
 }
-/// Verify arithmetic, actual-round endpoints, continuity and every canonical root.
+/// Verify legacy arithmetic, endpoints, continuity and canonical roots.
 pub fn verify<F, H, C>(
     trans: &mut Transcript<F>,
     shape: &Shape,
@@ -152,7 +203,29 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
-    let (base, queries) = bind_queries::<F, H, C>(trans, shape, initial, final_acc, sources)?;
+    verify_canonical::<F, H, Parameters<C>>(trans, shape, initial, final_acc, sources, proof)
+}
+/// Verify all linkage equations against caller-derived sources and endpoints.
+pub fn verify_canonical<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &Shape,
+    initial: &[F],
+    final_acc: &[F],
+    sources: &[CanonicalVerifierOracle<'_, H::Output, P>],
+    proof: &CanonicalProof<F, P::BatchProof>,
+) -> Result<(), Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    if sources.len() != SOURCES {
+        return Err(error("source count"));
+    }
+    let initial = sources[0].parameters.normalize_values(initial.to_vec());
+    let final_acc = sources[0].parameters.normalize_values(final_acc.to_vec());
+    let (base, queries) =
+        bind_queries_backend::<F, H, P>(trans, shape, &initial, &final_acc, sources)?;
     if proof.values.len() != SOURCES
         || proof.openings.len() != SOURCES
         || proof.values.iter().zip(&queries).any(|(v, q)| {
@@ -161,7 +234,12 @@ where
     {
         return Err(error("source proof counts or widths"));
     }
-    check(shape, initial, final_acc, &base, &proof.values)?;
+    for (s, values) in sources.iter().zip(&proof.values) {
+        for value in values {
+            s.parameters.validate_values(value).map_err(convert)?;
+        }
+    }
+    check(shape, &initial, &final_acc, &base, &proof.values)?;
     for (((source, q), values), opening) in sources
         .iter()
         .zip(&queries)
@@ -170,11 +248,12 @@ where
     {
         source
             .parameters
-            .verify_many::<F, H>(trans, source.commitment, q, values, opening)
+            .verify_many(trans, source.commitment, q, values, opening)
             .map_err(convert)?;
     }
     Ok(())
 }
+#[cfg(test)]
 fn bind_queries<F, H, C>(
     trans: &mut Transcript<F>,
     shape: &Shape,
@@ -187,6 +266,20 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
+    bind_queries_backend::<F, H, Parameters<C>>(trans, shape, initial, final_acc, sources)
+}
+fn bind_queries_backend<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &Shape,
+    initial: &[F],
+    final_acc: &[F],
+    sources: &[CanonicalVerifierOracle<'_, H::Output, P>],
+) -> Result<(Vec<MatrixPair<F>>, Vec<Vec<Vec<MatrixPair<F>>>>), Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
     if sources.len() != SOURCES
         || initial.len() != 2 * shape.polynomial_size
         || final_acc.len() != initial.len()
@@ -194,7 +287,7 @@ where
         return Err(error("source count or public endpoint lengths"));
     }
     let pp = sources[0].parameters;
-    shape.validate(pp)?;
+    shape.validate_dimensions(pp.num_vars(), pp.width())?;
     if sources
         .iter()
         .any(|s| s.parameters.width() != pp.width() || s.parameters.num_vars() != pp.num_vars())
@@ -207,15 +300,10 @@ where
     }
     let contexts = sources
         .iter()
-        .map(|s| {
-            Ok((
-                s.parameters.context_digest::<F, H>().map_err(convert)?,
-                s.commitment,
-            ))
-        })
+        .map(|s| Ok((s.parameters.context().map_err(convert)?, s.commitment)))
         .collect::<Result<Vec<_>, Error>>()?;
     trans.append_message(
-        b"packed accumulator canonical linkage v1",
+        P::ACCUMULATOR_DOMAIN,
         &(shape, initial, final_acc, contexts),
     );
     let base = (0..pp.num_vars())
@@ -725,3 +813,6 @@ mod binding_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod canonical_tests;

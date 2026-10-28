@@ -7,6 +7,12 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Accumulator linkage now dispatches through canonical backend sources while
+sharing the original endpoint, continuity and duplicated-half equations. Legacy
+callers retain their proof shape; masked callers authenticate ordered queries
+against retained source sessions. See `canonical-packed-accumulator.md`.
+Remaining PBS stages and full masked composition still need integration.
+
 Native bootstrapping/switching key owners and their complete-PBS setup wrapper
 now support statically selected canonical backends, retaining original source
 states and validating native layouts plus all logical parameter geometries.

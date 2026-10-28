@@ -26,6 +26,8 @@ pub trait CanonicalPcs<F: PrimeField, H: Hash + Send + Sync> {
     const NTT_DOMAIN: &'static [u8];
     /// Context-bound polynomial relation framing for the canonical API.
     const RELATION_DOMAIN: &'static [u8];
+    /// Bind accumulator geometry, public endpoints and ordered expected roots.
+    const ACCUMULATOR_DOMAIN: &'static [u8];
     /// Parameter/prover/verifier failure.
     type Error: std::fmt::Display;
     /// Registry framing, selected by the trusted backend.
@@ -112,6 +114,7 @@ where
     type BatchProof = BatchOpening<F, H::Output>;
     type SingleProof = Opening<F, H::Output>;
     const LINEAR_DOMAIN: &'static [u8] = b"packed canonical linear relations v1";
+    const ACCUMULATOR_DOMAIN: &'static [u8] = b"packed accumulator canonical linkage v1";
     const NTT_DOMAIN: &'static [u8] = b"packed tensor NTT v2";
     const RELATION_DOMAIN: &'static [u8] = b"HasteBoots canonical packed relation v2";
     type Error = super::Error;
@@ -188,6 +191,7 @@ where
     type BatchProof = masked_polyfrim::Proof<EF, H::Output>;
     type SingleProof = masked_polyfrim::Proof<EF, H::Output>;
     const LINEAR_DOMAIN: &'static [u8] = b"masked packed canonical linear relations v2";
+    const ACCUMULATOR_DOMAIN: &'static [u8] = b"masked packed accumulator canonical linkage v2";
     const NTT_DOMAIN: &'static [u8] = b"masked packed tensor NTT v2";
     const RELATION_DOMAIN: &'static [u8] = b"HasteBoots masked packed relation v2";
     type Error = masked_polyfrim::Error;

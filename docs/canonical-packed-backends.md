@@ -87,3 +87,7 @@ Native evaluation-key ownership and the complete-PBS setup wrapper also support
 canonical backends. The original retained states carry lifetime counters across
 oracle borrows; expected public setup contains no private state. See
 `canonical-native-key-setup.md`. Complete masked proof composition remains open.
+
+Accumulator linkage now shares its arithmetic/query maps across canonical
+backends, with retained state authentication and backend-specific framing. See
+`canonical-packed-accumulator.md`. Complete masked PBS composition remains open.
