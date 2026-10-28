@@ -7,6 +7,13 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+The direct packed PolyFRIM algebraic core now converts canonical Boolean tables
+to vector-polynomial coefficients, applies ordered matrix folds and computes
+antipodal consistency symbols without the scalar bridge's extra sumcheck.
+High-variable padding preserves the terminal matrix response. This is an
+algebraic component, not an authenticated/hiding PCS or a completed security
+gate. See `packed-polyfrim.md` for the construction and remaining obligations.
+
 Independent scalar round messages now run in parallel over immutable arithmetic
 metadata, with ordered collection before each common challenge. Four scalar tests
 include 54 byte-exact reference certificates / 378 equations over both fields and

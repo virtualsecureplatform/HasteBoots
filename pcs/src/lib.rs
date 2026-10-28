@@ -11,6 +11,8 @@ pub mod multilinear;
 pub mod mw_basefold;
 /// Experimental non-hiding ordinary PipFRI reference PCS.
 pub mod pipfri;
+/// Experimental algebraic core for direct ordered-matrix PolyFRIM.
+pub mod packed_polyfrim;
 /// Experimental authenticated rolling-batch FRI primitive for ordinary PipFRI.
 pub mod rolling_fri;
 /// utils, mainly used to implement linear time encodable code now
