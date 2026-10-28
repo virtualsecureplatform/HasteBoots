@@ -55,6 +55,21 @@ class AggregateValidationTests(unittest.TestCase):
         rows[0]["lookup_backend"]="extension"
         with self.assertRaises(ValueError):validate(encode(layouts,rows),"goldilocks",aggregate_hadamard=True,defer_lookup_sources=True)
 
+    def test_version_eight_requires_explicit_shared_query_mode(self):
+        layouts,rows=batch_fixture("goldilocks")
+        for row in rows:
+            row.update(protocol_version=8,transcript="merlin-direct-shared-query-comparisons-v1",
+                       hadamard_backend="multi-root",lookup_backend="shared-extension")
+        result=validate(encode(layouts,rows),"goldilocks",aggregate_hadamard=True,shared_query_lookups=True)
+        self.assertEqual(result["proofs"],21)
+        self.assertTrue(result["shared_query_lookups"])
+        self.assertIn("shared-query comparison",result["scope"])
+        for options in [{},{"aggregate_hadamard":True},{"shared_query_lookups":True},
+                        {"aggregate_hadamard":True,"shared_query_lookups":True,"defer_lookup_sources":True},
+                        {"aggregate_hadamard":True,"shared_query_lookups":1}]:
+            with self.assertRaises(ValueError):validate(encode(layouts,rows),"goldilocks",**options)
+
+
 
 class BatchValidationTests(unittest.TestCase):
     def test_shifted_lane_baseline_joint_bound_and_protocol(self):

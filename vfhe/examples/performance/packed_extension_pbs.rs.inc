@@ -24,6 +24,9 @@ fn main() {
     let defer_lookup_sources=std::env::args().any(|s|s=="--defer-lookup-sources");
     assert!(!defer_lookup_sources || (extension && aggregate_hadamard),
         "deferred lookup sources require extension comparisons and --aggregate-hadamard");
+    let shared_queries=std::env::args().any(|s|s=="--shared-query-lookups");
+    assert!(!shared_queries || (extension && aggregate_hadamard && !defer_lookup_sources),
+        "shared-query lookups require aggregate Hadamard and exclude deferred mode");
     let hadamard_backend = if aggregate_hadamard {"multi-root"} else {"independent"};
     let validation_batches = std::env::args().any(|s| s == "--validation-batches");
     assert!(
@@ -42,7 +45,7 @@ fn main() {
         .unwrap_or(1);
     assert!(iterations > 0);
     let repetitions = if extension { 1 } else { 16 };
-    let protocol_version = if defer_lookup_sources {
+    let protocol_version = if shared_queries {pbs::SHARED_PROTOCOL_VERSION} else if defer_lookup_sources {
         pbs::DEFERRED_PROTOCOL_VERSION
     } else if aggregate_hadamard {
         pbs::AGGREGATED_PROTOCOL_VERSION
@@ -51,7 +54,7 @@ fn main() {
     } else {
         pbs::PROTOCOL_VERSION
     };
-    let transcript = if defer_lookup_sources {
+    let transcript = if shared_queries {pbs::SHARED_TRANSCRIPT_ID} else if defer_lookup_sources {
         pbs::DEFERRED_TRANSCRIPT_ID
     } else if aggregate_hadamard {
         pbs::AGGREGATED_TRANSCRIPT_ID
@@ -60,7 +63,7 @@ fn main() {
     } else {
         pbs::TRANSCRIPT_ID
     };
-    let backend = if defer_lookup_sources {"deferred-extension"} else if extension { "extension" } else { "lanes" };
+    let backend = if shared_queries {"shared-extension"} else if defer_lookup_sources {"deferred-extension"} else if extension { "extension" } else { "lanes" };
     let extension_degree = if extension { EF::D } else { 1 };
     let width = std::env::args()
         .position(|s| s == "--width")
@@ -288,7 +291,11 @@ fn main() {
             private_roots,
             ntt_links,
             proof_sha256,
-        ) = if defer_lookup_sources {
+        ) = if shared_queries {
+            certificate!(pbs::prove_shared_with_statistics::<F, EF, Sha256, _>(&pp, &setup, &statement, &trace, &mut stats),
+            pbs::SharedProof<F, EF, [u8;32]>,
+            |proof|pbs::verify_shared::<F,EF,Sha256,_>(&pp,&verifier,&statement,proof))
+        } else if defer_lookup_sources {
             certificate!(pbs::prove_deferred_with_statistics::<F, EF, Sha256, _>(&pp, &setup, &statement, &trace, &mut stats),
             pbs::DeferredProof<F, EF, [u8;32]>,
             |proof|pbs::verify_deferred::<F,EF,Sha256,_>(&pp,&verifier,&statement,proof))

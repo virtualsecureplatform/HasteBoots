@@ -63,6 +63,21 @@ class FullInventoryTests(unittest.TestCase):
         full_bounds(record,padded)
         with self.assertRaises(ValueError):full_bounds(deferred,padded)
 
+    def test_shared_queries_retain_old_terms_and_count_six_field_cancellations(self):
+        record,layouts=self.fixture()
+        record.update(protocol_version=5,transcript="merlin-direct-aggregated-hadamard-deferred-lookup-sources-v1",
+            lookup_backend="deferred-extension",lookup_field_degree=6,lookup_repetitions=1,hadamard_backend="multi-root")
+        old=full_bounds(record,layouts)
+        shared=dict(record,protocol_version=8,transcript="merlin-direct-shared-query-comparisons-v1",lookup_backend="shared-extension")
+        new=full_bounds(shared,layouts)
+        self.assertEqual(new.pop("shared_lookup_aggregation_cancellation"),Fraction(6,BABYBEAR**6))
+        self.assertEqual(new,old)
+        with self.assertRaises(ValueError):full_bounds(dict(shared,lookup_backend="deferred-extension"),layouts)
+        padded={k:dict(v) for k,v in layouts.items()}
+        padded["helper"].update(block_width=16,row_message_blocks=4096,row_encoded_blocks=8192)
+        full_bounds(record,padded)
+        with self.assertRaises(ValueError):full_bounds(shared,padded)
+
     def test_invalid_inventory_or_layout_is_rejected(self):
         record,layouts=self.fixture()
         for change in [dict(ntt_links=8),dict(private_coefficient_roots=17),dict(output_dimension=1024),dict(polynomial_size=2048)]:
