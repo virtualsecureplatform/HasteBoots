@@ -13,8 +13,11 @@ relation equation is checked independently; conflicting aliases reject before
 random aggregation. Complete 1/4/16 decoded public tests pass for both fields,
 as do canonical relation/PCS tests and all 86 Python checks. The implementation
 shares protocol bodies while retaining old domains and formats. Native validation,
-comparative measurements and fresh complete v7 malicious-child audits remain
-open. Two-order toy runs verify 24 packets covering 168 member instances; all
+comparative measurements remain open. Fresh v7 reconstructed-child audits
+pass twenty certificates (two controls accepted, eighteen attacks rejected),
+including malicious members first and last beside an honest alternate anchor.
+The full release audit across versions 2–7 passes all 150 certificates in fifteen
+tests, with fifteen controls accepted and 135 attacks rejected. Two-order toy runs verify 24 packets covering 168 member instances; all
 twelve v6 wire controls match archived bytes. At sixteen members, toy bytes fall
 3.28%/6.76% with repeated hashes exact. Original-size native correctness is running
 serially. See `packed-canonical-pbs.md`.

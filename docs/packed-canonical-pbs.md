@@ -43,6 +43,22 @@ Both field profiles pass decoded public complete verification at sizes 1, 4, and
 Four relation integration tests cover both formats and heterogeneous factor
 counts. Four relation unit tests cover fresh opposite-equation certificates,
 including the canonical path: actual residuals cannot cancel across equations.
+Fresh complete v7 reconstructed-child audits also pass twenty certificates:
+two honest controls are accepted and eighteen deliberate attacks reject. Each
+field covers wrong input mask/output body/output mask, wrong BSK/KSK, false
+initial/final endpoints, chain splicing and inconsistent duplicate views. Eight
+cases per field place the freshly rebuilt target beside a distinct honest anchor,
+with targets first and last; wrong-key cases use a single member. Independent
+reference algebra and actual-root canonical PCS verification succeed before the
+serialized production verifier checks the requested statement and trusted keys.
+The reference and prover transcripts agree after joint authentication.
+The combined release audit passes fifteen tests and all 150 reconstructed
+certificates across versions 2–7: fifteen controls accepted and 135 attacks
+rejected. The v7 cases cover 36 member instances. Logs, checked cases, source
+archives and the summary script are in
+`target/performance/canonical-pbs-binding-audit/`; only two adversarial test files
+change relative to the frozen production build, besides documentation.
+
 Four PCS integration tests cover both paths, including deterministic rejection of
 conflicting aliases, distinct roots with equal values, missing columns and wrong
 private states. All 86 Python checks pass.
@@ -57,7 +73,6 @@ are toy size/correctness results, not native latency evidence.
 
 Frozen source and binaries, commands, logs and comparison scripts are under
 `target/performance/canonical-pbs/`. Original-size native correctness is running serially under
-`target/performance/canonical-pbs-native/`. Native comparative timing,
-reconstructed full v7 malicious-child audits and comparative memory remain
+`target/performance/canonical-pbs-native/`. Native comparative timing and comparative memory remain
 separate validation gates. This change does not establish the full-plan promotion
 criteria.
