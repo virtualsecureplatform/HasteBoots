@@ -74,6 +74,13 @@ pub struct State<F, H: Hash + Send + Sync> {
     parameter_digest: H::Output,
 }
 
+impl<F, H: Hash + Send + Sync> State<F, H> {
+    /// Borrow the immutable original prover word, without exposing encoded state.
+    /// This is private witness access for a prover, never a verifier input.
+    pub fn table(&self) -> &PackedTable<F> { &self.table }
+}
+
+
 /// Trusted shape and linear-code parameters for one family of tables.
 pub struct Parameters<C> {
     num_vars: usize,

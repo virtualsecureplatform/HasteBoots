@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 pub mod deferred;
 /// Shared-query comparison algebra and canonical authentication across limbs.
 pub mod shared;
+/// Independent decompositions sharing bounded comparison groups.
+pub mod batch;
 /// Shared-query canonical comparison entry points.
 pub use shared::{prove as prove_shared,verify as verify_shared};
 /// Deferred canonical comparison entry points, for complete-protocol composition.
@@ -308,6 +310,23 @@ where
     C: RowCode<F> + Serialize,
     B: Backend<F, H, C>,
 {
+    prove_retained::<F, H, C, B>(trans, config, source, helper, digits, statistics, None)
+}
+pub(crate) fn prove_retained<F, H, C, B>(
+    trans: &mut Transcript<F>,
+    config: &Config,
+    source: &ProverOracle<'_, F, H, C>,
+    helper: Option<&pcs::matrix_weighted::Parameters<C>>,
+    digits: &[&ProverOracle<'_, F, H, C>],
+    statistics: &mut crate::packed_lane_lookup::ProverStatistics,
+    retain: Option<&mut Option<Vec<pcs::matrix_weighted::State<F,H>>>>,
+) -> Result<Proof<F, H::Output, B::Proof>, Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    C: RowCode<F> + Serialize,
+    B: Backend<F, H, C>,
+{
     B::bind_domain(trans);
     let public_digits: Vec<_> = digits.iter().map(|d| d.verifier()).collect();
     bind::<F, H, C>(trans, config, &source.verifier(), &public_digits)?;
@@ -376,6 +395,7 @@ where
         .chain(borrow_oracles.iter())
         .collect();
     let comparisons = B::prove_comparisons(trans, &requests, helper, statistics, &registry)?;
+    if let Some(sink) = retain { *sink = Some(states); }
     Ok(Proof {
         borrow_commitments,
         linear,

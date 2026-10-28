@@ -523,6 +523,49 @@ where
     .map_err(convert)
 }
 
+// Test-only malicious-prover/reference adapters; production entry points always
+// enforce the terminal source identity.
+#[cfg(test)]
+pub(crate) fn prove_foreign_for_audit<F, EF, H, C>(
+    parent: &mut Transcript<F>,
+    helper: &Parameters<C>,
+    sources: &[&ProverOracle<'_, F, H, C>],
+    requests: &[Request<F>],
+    witness: &[&PackedTable<F>],
+) -> Result<Proof<F, EF, H::Output>, Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    C: RowCode<F> + Serialize,
+{
+    prove_inner::<F, EF, H, C>(
+        parent,
+        helper,
+        sources,
+        requests,
+        witness,
+        false,
+        &mut ProverStatistics::default(),
+    )
+}
+#[cfg(test)]
+pub(crate) fn verify_reference_for_audit<F, EF, H, C>(
+    parent: &mut Transcript<F>,
+    helper: &Parameters<C>,
+    sources: &[VerifierOracle<'_, H::Output, C>],
+    requests: &[Request<F>],
+    proof: &Proof<F, EF, H::Output>,
+) -> Result<(), Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    C: RowCode<F> + Serialize,
+{
+    verify_inner::<F, EF, H, C>(parent, helper, sources, requests, proof, false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
