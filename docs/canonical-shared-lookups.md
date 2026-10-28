@@ -30,7 +30,8 @@ helper or source openings. Private cryptographic randomness commits every helper
 The standalone canonical lookups, legacy shared/deferred protocols and complete
 version-10 PBS format remain available unchanged. Canonical radix decomposition
 now has a shared-comparison entry point; see
-`canonical-shared-decomposition.md`. Complete key-switch/PBS integration remains
+`canonical-shared-decomposition.md`. A shared final key-switch entry point is
+documented in `canonical-shared-key-switch.md`; complete-PBS integration remains
 open. Memory grows
 with the number of reciprocal helpers; callers must bound native-size groups.
 The masked adapter still emits independent child PCS proofs. Shared algebra

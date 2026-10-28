@@ -506,3 +506,6 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) mod audit;
+
+/// Final key switching with shared canonical limb comparisons.
+pub mod shared;

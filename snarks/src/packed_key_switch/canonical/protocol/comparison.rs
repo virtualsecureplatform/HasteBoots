@@ -1,4 +1,5 @@
 use super::*;
+use crate::packed_decomposition::canonical::shared;
 use crate::packed_decomposition::{Config as Radix, canonical as per_limb};
 pub(super) trait Comparison<F, EF, H, P>
 where
@@ -73,3 +74,8 @@ macro_rules! backend {
     };
 }
 backend!(PerLimb, per_limb, None);
+backend!(
+    Shared,
+    shared,
+    Some(b"canonical shared-comparison final key switch v1")
+);

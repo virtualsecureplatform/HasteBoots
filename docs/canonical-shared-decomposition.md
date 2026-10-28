@@ -31,7 +31,9 @@ does not refund earlier openings.
 
 The new path uses public linear and sumcheck algebra. The masked PCS does not
 make it a hiding proof, and per-root packets are not genuine joint aggregation.
-Complete canonical key-switch/PBS integration, native-size measurements, robust
+The canonical final key-switch stage now has a shared-comparison entry point;
+see `canonical-shared-key-switch.md`. Complete-PBS integration, native-size
+measurements, robust
 vector proximity, adaptive hiding, knowledge/Fiat-Shamir composition and the
 original security/performance promotion gates remain open. Helper memory grows
 with the number of limbs and repetitions; native callers must bound groups.

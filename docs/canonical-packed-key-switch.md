@@ -76,3 +76,8 @@ fail the known-table check. Sixty fresh full binding cases retain six accepted
 controls and fifty-four rejected attacks. The locked workspace check passes.
 Logs, checked records and validated sources are under
 `target/performance/canonical-packed-key-switch-boundary/`.
+
+A separate shared-comparison final-stage entry point is now available; see
+`canonical-shared-key-switch.md`. It retains this path's known-input, NTT,
+native-key product and extraction checks while sharing canonical limb queries.
+The per-limb proof spelling and frozen serialized bytes remain compatible.
