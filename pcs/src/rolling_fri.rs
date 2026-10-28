@@ -193,7 +193,7 @@ where
     F: Field + Serialize,
     H: Hash + Send + Sync,
 {
-    prove_mode(trans, pp, originals, strict, false).map(|(proof, _)| proof)
+    prove_mode(trans, pp, originals, strict, Virtual::None).map(|(proof, _)| proof)
 }
 /// Public verifier coins/locations, retained for virtual-oracle consistency
 /// checks and numerical disclosure auditing by the enclosing protocol.
@@ -231,14 +231,111 @@ where
     };
     let mut originals = vec![&first];
     originals.extend_from_slice(following);
-    prove_mode(trans, pp, &originals, true, true)
+    prove_mode(trans, pp, &originals, true, Virtual::First)
+}
+#[derive(Clone, Copy)]
+enum Virtual {
+    None,
+    First,
+    All,
+}
+impl Virtual {
+    fn contains(self, layer: usize) -> bool {
+        match self {
+            Self::None => false,
+            Self::First => layer == 0,
+            Self::All => true,
+        }
+    }
+}
+/// All original words are virtual projections of enclosing authenticated roots.
+/// The enclosing protocol must fix those roots before selecting the projections.
+pub(crate) fn prove_virtual_all<F, H>(
+    trans: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    identifiers: &[H::Output],
+    values: Vec<Vec<F>>,
+) -> Result<(Proof<F, H::Output>, Trace<F>), Error>
+where
+    F: Field + Serialize,
+    H: Hash + Send + Sync,
+{
+    prove_virtual_all_inner::<F, H>(trans, pp, identifiers, values, true)
+}
+#[cfg(test)]
+pub(crate) fn prove_virtual_all_for_audit<F, H>(
+    trans: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    identifiers: &[H::Output],
+    values: Vec<Vec<F>>,
+) -> Result<(Proof<F, H::Output>, Trace<F>), Error>
+where
+    F: Field + Serialize,
+    H: Hash + Send + Sync,
+{
+    prove_virtual_all_inner::<F, H>(trans, pp, identifiers, values, false)
+}
+fn prove_virtual_all_inner<F, H>(
+    trans: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    identifiers: &[H::Output],
+    values: Vec<Vec<F>>,
+    strict: bool,
+) -> Result<(Proof<F, H::Output>, Trace<F>), Error>
+where
+    F: Field + Serialize,
+    H: Hash + Send + Sync,
+{
+    if identifiers.len() != pp.rounds()
+        || values.len() != pp.rounds()
+        || values.iter().enumerate().any(|(i, v)| v.len() != pp.len(i))
+    {
+        return Err(Error("virtual original geometry"));
+    }
+    let states: Vec<_> = values
+        .into_iter()
+        .enumerate()
+        .map(|(layer, values)| {
+            let mut tree = MerkleTree::<H>::new();
+            tree.root = identifiers[layer];
+            State {
+                values,
+                tree,
+                context: pp.context::<H>(),
+                role: Role::Original,
+                layer,
+            }
+        })
+        .collect();
+    let originals: Vec<_> = states.iter().collect();
+    prove_mode(trans, pp, &originals, strict, Virtual::All)
+}
+/// Authenticate every projected original pair at (layer, initial-domain index).
+/// Empty virtual paths are mandatory; callbacks must check the enclosing roots.
+pub(crate) fn verify_virtual_all<F, H, V>(
+    trans: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    identifiers: &[H::Output],
+    proof: &Proof<F, H::Output>,
+    authenticate: V,
+) -> Result<Trace<F>, Error>
+where
+    F: Field + Serialize,
+    H: Hash + Send + Sync,
+    V: FnMut(usize, usize, &PairOpening<F, H::Output>) -> Result<(), Error>,
+{
+    let originals: Vec<_> = identifiers
+        .iter()
+        .map(|&root| Commitment { root })
+        .collect();
+    verify_mode::<F, H, V>(trans, pp, &originals, proof, Virtual::All, authenticate)
 }
 fn prove_mode<F, H>(
     trans: &mut Transcript<F>,
     pp: &Parameters<F>,
     originals: &[&State<F, H>],
     strict: bool,
-    virtual_first: bool,
+    virtual_mode: Virtual,
 ) -> Result<(Proof<F, H::Output>, Trace<F>), Error>
 where
     F: Field + Serialize,
@@ -255,10 +352,10 @@ where
         return Err(Error("original oracle states or contexts"));
     }
     let roots = originals.iter().map(|s| s.commitment()).collect::<Vec<_>>();
-    if virtual_first {
-        bind_mode::<F, H>(trans, pp, &roots, true)?;
-    } else {
+    if matches!(virtual_mode, Virtual::None) {
         bind::<F, H>(trans, pp, &roots)?;
+    } else {
+        bind_mode::<F, H>(trans, pp, &roots, virtual_mode)?;
     }
     let mut combined = originals[0].values.clone();
     let mut derived = Vec::new();
@@ -295,9 +392,12 @@ where
                 .iter()
                 .enumerate()
                 .map(|(i, s)| {
-                    if virtual_first && i == 0 {
+                    if virtual_mode.contains(i) {
                         PairOpening {
-                            values: [s.values[index & !1], s.values[(index & !1) + 1]],
+                            values: [
+                                s.values[(index >> i) & !1],
+                                s.values[((index >> i) & !1) + 1],
+                            ],
                             path: vec![],
                         }
                     } else {
@@ -333,7 +433,7 @@ where
     F: Field + Serialize,
     H: Hash + Send + Sync,
 {
-    verify_mode::<F, H, _>(trans, pp, originals, proof, false, |_, _| {
+    verify_mode::<F, H, _>(trans, pp, originals, proof, Virtual::None, |_, _, _| {
         Err(Error("unexpected virtual oracle"))
     })
     .map(|_| ())
@@ -346,7 +446,7 @@ pub(crate) fn verify_virtual_initial<F, H, V>(
     identifier: H::Output,
     following: &[Commitment<H::Output>],
     proof: &Proof<F, H::Output>,
-    authenticate: V,
+    mut authenticate: V,
 ) -> Result<Trace<F>, Error>
 where
     F: Field + Serialize,
@@ -355,26 +455,29 @@ where
 {
     let mut originals = vec![Commitment { root: identifier }];
     originals.extend_from_slice(following);
-    verify_mode::<F, H, V>(trans, pp, &originals, proof, true, authenticate)
+    verify_mode::<F, H, _>(
+        trans,
+        pp,
+        &originals,
+        proof,
+        Virtual::First,
+        |_, index, pair| authenticate(index, pair),
+    )
 }
 fn verify_mode<F, H, V>(
     trans: &mut Transcript<F>,
     pp: &Parameters<F>,
     originals: &[Commitment<H::Output>],
     proof: &Proof<F, H::Output>,
-    virtual_first: bool,
+    virtual_mode: Virtual,
     mut authenticate: V,
 ) -> Result<Trace<F>, Error>
 where
     F: Field + Serialize,
     H: Hash + Send + Sync,
-    V: FnMut(usize, &PairOpening<F, H::Output>) -> Result<(), Error>,
+    V: FnMut(usize, usize, &PairOpening<F, H::Output>) -> Result<(), Error>,
 {
-    if virtual_first {
-        bind_mode::<F, H>(trans, pp, originals, true)?;
-    } else {
-        bind::<F, H>(trans, pp, originals)?;
-    }
+    bind_mode::<F, H>(trans, pp, originals, virtual_mode)?;
     let rounds = pp.rounds();
     if proof.derived.len() != rounds - 1
         || proof.queries.len() != pp.queries
@@ -397,11 +500,11 @@ where
     let indices = indices(trans, pp);
     for (index, q) in indices.iter().copied().zip(&proof.queries) {
         for i in 0..rounds {
-            if virtual_first && i == 0 {
+            if virtual_mode.contains(i) {
                 if !q.originals[i].path.is_empty() {
                     return Err(Error("virtual oracle supplied Merkle path"));
                 }
-                authenticate(index, &q.originals[i])?;
+                authenticate(i, index, &q.originals[i])?;
             } else {
                 check_pair::<F, H>(
                     pp,
@@ -451,22 +554,22 @@ fn bind<F: Field + Serialize, H: Hash>(
     pp: &Parameters<F>,
     roots: &[Commitment<H::Output>],
 ) -> Result<(), Error> {
-    bind_mode::<F, H>(t, pp, roots, false)
+    bind_mode::<F, H>(t, pp, roots, Virtual::None)
 }
 fn bind_mode<F: Field + Serialize, H: Hash>(
     t: &mut Transcript<F>,
     pp: &Parameters<F>,
     roots: &[Commitment<H::Output>],
-    virtual_first: bool,
+    virtual_mode: Virtual,
 ) -> Result<(), Error> {
     if roots.len() != pp.rounds() {
         return Err(Error("expected original root count"));
     }
     t.append_message(
-        if virtual_first {
-            b"HasteBoots rolling batch FRI virtual initial v1"
-        } else {
-            b"HasteBoots rolling batch FRI v1"
+        match virtual_mode {
+            Virtual::None => b"HasteBoots rolling batch FRI v1".as_slice(),
+            Virtual::First => b"HasteBoots rolling batch FRI virtual initial v1".as_slice(),
+            Virtual::All => b"HasteBoots rolling batch FRI virtual all v1".as_slice(),
         },
         &(pp.context::<H>(), roots),
     );

@@ -3,6 +3,8 @@
 //! This proves sampled transitions only. It is not an evaluation-binding PCS:
 //! a separately composed proximity proof is required for every oracle lane.
 use super::{Polynomial, fold_symbol};
+/// Same-root rolling proximity checks composed with matrix consistency.
+pub mod proximity;
 use crate::{
     rolling_fri,
     utils::{hash::Hash, merkle_tree::MerkleTree},
@@ -159,6 +161,16 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
     query: &[MatrixPair<F>],
     claim: &[F],
 ) -> Result<Proof<F, H::Output>, Error> {
+    let layers = ladder(pp, source, query, claim)?;
+    let states: Vec<_> = std::iter::once(source).chain(layers.iter()).collect();
+    Ok(certificate(t, pp, &states, query, claim))
+}
+fn ladder<F: Field + Serialize, H: Hash + Send + Sync>(
+    pp: &Parameters<F>,
+    source: &State<F, H>,
+    query: &[MatrixPair<F>],
+    claim: &[F],
+) -> Result<Vec<State<F, H>>, Error> {
     pp.query(query, claim)?;
     if source.layer != 0 || source.context != hash::<H, _>(&(b"packed PolyFRIM parameters v1", pp))
     {
@@ -179,9 +191,9 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
     if polynomial.evaluate(F::zero()) != claim {
         return Err(Error("false terminal claim"));
     }
-    let states: Vec<_> = std::iter::once(source).chain(layers.iter()).collect();
-    Ok(certificate(t, pp, &states, query, claim))
+    Ok(layers)
 }
+
 fn certificate<F: Field + Serialize, H: Hash + Send + Sync>(
     t: &mut Transcript<F>,
     pp: &Parameters<F>,
@@ -383,6 +395,60 @@ mod tests {
                 assert_eq!(
                     prover.get_challenge(b"after"),
                     verifier.get_challenge(b"after")
+                );
+                let mut complete_prover = Transcript::new();
+                let complete = proximity::prove::<F, Sha256>(
+                    &mut complete_prover,
+                    &pp,
+                    &source,
+                    &query,
+                    &claim,
+                )
+                .unwrap();
+                let bytes =
+                    bincode::serde::encode_to_vec(&complete, bincode::config::standard()).unwrap();
+                let (complete, used): (proximity::Proof<F, [u8; 32]>, usize) =
+                    bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
+                assert_eq!(used, bytes.len());
+                let mut complete_verifier = Transcript::new();
+                proximity::verify::<F, Sha256>(
+                    &mut complete_verifier,
+                    &pp,
+                    &source.root(),
+                    &query,
+                    &claim,
+                    &complete,
+                )
+                .unwrap();
+                assert_eq!(
+                    complete_prover.get_challenge(b"after complete"),
+                    complete_verifier.get_challenge(b"after complete")
+                );
+                let mut changed = complete.clone();
+                changed.packed[0][0].values[0] += F::one();
+                assert!(
+                    proximity::verify::<F, Sha256>(
+                        &mut Transcript::new(),
+                        &pp,
+                        &source.root(),
+                        &query,
+                        &claim,
+                        &changed
+                    )
+                    .is_err()
+                );
+                let mut changed = complete.clone();
+                changed.proximity.queries[0].originals[0].path.push([0; 32]);
+                assert!(
+                    proximity::verify::<F, Sha256>(
+                        &mut Transcript::new(),
+                        &pp,
+                        &source.root(),
+                        &query,
+                        &claim,
+                        &changed
+                    )
+                    .is_err()
                 );
                 let mut bad = decoded.clone();
                 bad.queries[0][0].path.clear();

@@ -48,9 +48,10 @@ implementation tests direct matrix-weight expansion, antipodal consistency at
 every layer and the padding terminal identity for both fields, dimensions 0–6
 and widths 1/2/4/8. A concrete noncommuting example distinguishes reversed order.
 
-Remaining implementation includes a separately checked low-degree/proximity
-proof, private random masking, bounded-reuse disclosure analysis and complete-PBS
-statement binding. Concrete soundness, hiding and Fiat–Shamir
+Remaining implementation includes private random masking, bounded-reuse
+disclosure analysis and complete-PBS statement binding. The same-root projected
+rolling-proximity composition below now implements the next checking layer,
+while its quantitative vector-proximity argument remains open. Concrete soundness, hiding and Fiat–Shamir
 composition must precede security-matched complete-PBS promotion.
 
 Validation: all four new tests pass (56 padded ladders and 896 antipodal
@@ -96,3 +97,59 @@ paths under the false statement, then fail specifically at the matrix equation.
 Logs and validated sources are in
 `target/performance/direct-packed-polyfrim-authenticated/`, source SHA-256
 `3db2825616ace2db13e1fe3b697848b5941ca2217141fee5f8e9e393f89160dc`.
+
+## Same-root projected rolling proximity
+
+`authenticated::proximity` composes matrix consistency with rolling FRI. After
+all vector-oracle roots are fixed and the consistency transcript is processed,
+it draws a lane-weight row for every layer from the caller's transcript. The scalar word for that
+layer is the linear combination of its committed lanes. No scalar copy is
+committed. A domain-separated identifier binds each packed root, layer, geometry
+and projection row; the new rolling-FRI virtual-all mode binds all identifiers
+before its folding challenges. Ordinary and virtual-first rolling modes retain
+their existing domains and message schedules.
+
+At every original-oracle query the verifier authenticates the entire packed
+antipodal leaf against that exact layer root and reconstructs both projected
+values. Virtual originals must have empty scalar Merkle paths. Derived scalar
+oracles retain ordinary authenticated rolling-FRI roots and fold checks. The
+terminal scalar is checked as in the rolling protocol. The combined certificate
+contains both consistency and proximity packets plus the packed query paths;
+there is no option for the verifier to omit either component.
+
+This removes the independently committed-copy gap. It does not establish a
+concrete vector-proximity bound: a reduction from random lane projections to a
+common nearby vector polynomial, scalar FRI soundness, matrix-consistency error,
+field/challenge distributions (including the caller-selected transcript sampler)
+and adaptive Fiat–Shamir composition must still be
+quantified and reviewed. In particular, the small-prime fixtures are correctness
+tests, not 128-bit profiles. The construction remains non-hiding and is not
+selected by complete PBS.
+
+For exact code membership, a simple conditional projection lemma applies. Fix
+all packed words before drawing a uniform row lambda in F^k. Interpolate each
+lane on its N distinct domain points, giving coefficient polynomials of degree
+<N. If some lane has degree >=m, the matrix of coefficients at degrees m,...,N−1
+has a nonzero row h. A projected word has degree <m only if h*lambda=0. Fix all
+lambda entries except one whose coefficient in h is nonzero: exactly one choice
+of that entry satisfies the equation. Thus exact membership can cancel with
+probability at most 1/|F|. Taking a union over L fixed layers gives L/|F| for
+these exact-membership cancellation events.
+
+This argument assumes genuinely uniform rows conditioned on the fixed words.
+It is not a robust proximity lemma: rolling FRI allows distance from the code,
+and nearby projected codewords can depend on lambda. Replacing the required
+vector-proximity bound by this exact-membership bound would be unjustified.
+
+Validation: all 58 selected release/locked tests pass: 39 PCS unit tests, four
+masked adapters, eight ordinary adapters and seven encoder checks. The combined
+construction serializes/decodes/verifies 32 honest packets over both fields and
+all four widths. Four fresh foreign scalar projections pass independent scalar
+FRI checks and actual packed-path checks, then fail at projection equality. Two
+fresh over-degree words with genuine roots/paths pass zero-matrix consistency
+and all nonterminal scalar recurrences, then fail the rolling terminal equation.
+The relaxed terminal prover used to build those two certificates exists only
+under `cfg(test)`; production proving and verification retain strict checks.
+Logs, checked counts and validated sources are under
+`target/performance/direct-packed-polyfrim-proximity/`, source SHA-256
+`16503bab78953a3f4e4807b7a42a7d6bffd71b8c87dcbaaaee8930711f3f8eb0`.

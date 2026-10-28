@@ -12,9 +12,13 @@ to vector-polynomial coefficients, applies ordered matrix folds and computes
 antipodal consistency symbols without the scalar bridge's extra sumcheck.
 High-variable padding preserves the terminal matrix response. A new authenticated
 consistency ladder binds all layer roots/query/claim before sampling and checks
-all lane transitions against exact packed Merkle roots. Low-degree/proximity and
-hiding remain separate unimplemented obligations for this construction; it is
-not an evaluation-binding PCS or a completed security gate. See `packed-polyfrim.md` for the construction and remaining obligations.
+all lane transitions against exact packed Merkle roots. An experimental same-root rolling-proximity composition now projects each
+packed layer and authenticates every virtual scalar query through those exact
+packed roots. All 58 selected release PCS/adapter/encoder tests pass, including
+32 combined packets and six fresh same-root/proximity forgery certificates.
+Quantitative vector-proximity/composition analysis and hiding
+remain open; this is not a certified evaluation-binding PCS or a completed
+security gate. See `packed-polyfrim.md` for the construction and remaining obligations.
 
 Independent scalar round messages now run in parallel over immutable arithmetic
 metadata, with ordered collection before each common challenge. Four scalar tests
