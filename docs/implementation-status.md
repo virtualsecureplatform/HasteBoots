@@ -7,6 +7,12 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Canonical radix decomposition now composes retained source/digit roots,
+canonical reconstruction/borrow-endpoint checks and extension-field transition
+lookups, with explicit trusted borrow/helper budgets across adjacent limbs. See
+`canonical-packed-decomposition.md`. Shared/deferred composition, final-stage
+integration and the original full security/performance gates remain open.
+
 Extension-field rational lookups now expose canonical backend authentication
 for original sources and coefficient-packed reciprocal helpers, retaining the
 existing scalar extension algebra and base-field pullback maps. See

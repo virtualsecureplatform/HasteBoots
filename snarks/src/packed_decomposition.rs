@@ -803,3 +803,6 @@ where
     }
     Ok(())
 }
+
+/// Exact radix decomposition over statically selected canonical PCS backends.
+pub mod canonical;

@@ -100,3 +100,8 @@ Standalone extension-field lookups also authenticate original sources and
 coefficient-packed reciprocal helpers through canonical backends. The selected
 extension algebra is preserved. See `canonical-extension-lookups.md`; shared
 comparison composition and complete masked PBS remain open.
+
+Radix decomposition now composes canonical reconstruction, zero borrow endpoints
+and per-limb extension comparisons against original source/digit roots. See
+`canonical-packed-decomposition.md`; shared comparison aggregation and complete
+masked PBS remain open.
