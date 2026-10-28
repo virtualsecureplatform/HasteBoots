@@ -16,9 +16,9 @@ The core batch then binds all ordered extension claims and mask responses before
 its one shared source certificate, followed by independently checked masked
 ladders. Parent and extension child transcripts finish with matching digests.
 
-This is opt-in source sharing. The canonical `CanonicalPcs` implementation and
-complete version-10/11 PBS entry points still use the independent adapter. A
-statically selected joint backend and complete-PBS integration, full query/FRI
+This is opt-in source sharing. The original canonical backend remains independent; the new trusted
+`joint::Parameters` type selects joint packets through `CanonicalPcs` and complete
+version-10/11 PBS proofs. See `canonical-joint-backend.md`. Full query/FRI
 aggregation, original-size measurements, robust vector proximity, base-projection
 knowledge, whole-proof Fiat–Shamir/hash/knowledge composition, adaptive hiding and
 independent review remain open. Numerical disclosure capacity is not a theorem.

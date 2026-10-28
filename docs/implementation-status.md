@@ -7,14 +7,23 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+A distinct trusted joint-source canonical backend now composes complete version-
+10/11 encrypted PBS proofs. Eight serialized/decoded complete proofs verify in
+two isolated repetitions with identical full hashes and original native key
+roots. The same 3,924 ordered responses use 1,900 source certificates. Small
+version-11 proofs are 11.5% smaller for BabyBear and 9.2% for Goldilocks than
+matched-geometry independent controls. See `canonical-joint-backend.md`.
+Original-size/security, controlled backend timing, full query/FRI aggregation,
+hiding and independent-review gates remain open.
+
 An opt-in masked joint-source API now shares one original-source proximity
 certificate across ordered 1/4/16-query batches. Each query retains its own
 masked ladder and consumes its original allowance. Both core and base adapter
 verify decoded batches and enforce one lifetime across independent/joint calls.
 Sixteen-query component packets are 16.7–20.2% smaller with faster proving in
 both execution orders. See `joint-source-proximity.md` and
-`masked-joint-adapter.md`. Full query/FRI aggregation, canonical backend/PBS
-integration, original-size/security, hiding and promotion remain open.
+`masked-joint-adapter.md`. The joint canonical backend now integrates these packets into complete PBS.
+Full query/FRI aggregation, original-size/security, hiding and promotion remain open.
 
 Two serial complete encrypted masked-PBS profile processes now verify eight
 version-10/11 proofs and 3,924 actual child openings. All complete proof hashes
