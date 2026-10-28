@@ -7,6 +7,21 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Deferred extension lookup source authentication is available as a separate
+component API (`packed_extension_lookup::deferred`). A caller-derived registry
+binds parameter contexts and roots before lookup algebra; terminal openings
+authenticate every accumulated claim once per used canonical source. Helper
+authentication remains immediate. Equal roots with different parameter contexts
+are distinct sources. Existing standalone lookup APIs retain their original
+authentication path. This component has not been integrated into complete PBS
+or promoted as cross-statement aggregation.
+Seventeen integration tests and nine lookup unit tests pass, including genuine
+false-source rejection and registry/claim/shape tampering. Workspace examples
+check and release builds pass. The `deferred_lookup` example compares immediate
+and deferred authentication for 1/4/16 shared-source lookup groups; twelve toy
+serialized packets verify across BabyBear and Goldilocks. These are smoke checks,
+not native performance evidence or a whole-proof security certificate.
+
 Complete protocol version 4 now offers opt-in aggregated Hadamard authentication
 with the same trusted bootstrapping-key roots and canonical source linkage.
 Every other stage keeps its previous backend; versions 2/3 remain defaults.
