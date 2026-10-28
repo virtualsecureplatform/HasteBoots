@@ -16,6 +16,9 @@ use pcs::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Canonical comparisons with shared terminal source authentication.
+pub mod deferred;
+
 /// Invalid trusted configuration, noncanonical digits, or rejected subproof.
 #[derive(Debug, thiserror::Error)]
 #[error("packed canonical decomposition: {0}")]
@@ -119,7 +122,8 @@ pub struct Proof<F, O, P = packed_tuple_lookup::Proof<F, O>> {
     pub borrow_commitments: Vec<Commitment<O>>,
     /// Shared canonical reconstruction and endpoint check.
     pub linear: packed_linear::Proof<F, O>,
-    /// One public transition lookup per limb, proving ranges and comparison.
+    /// Backend-specific transition packets proving limb ranges and comparison.
+    /// Existing backends use one packet per limb; deferred authentication uses one.
     pub comparisons: Vec<P>,
 }
 /// Canonical decomposition using lane-batched comparison proofs.
@@ -359,25 +363,13 @@ where
     linear_sources.extend(borrow_oracles.iter());
     let linear = packed_linear::prove::<F, H, C>(trans, &linear_sources, &relations::<F>(config)?)
         .map_err(convert)?;
-    let mut comparisons = Vec::with_capacity(d);
-    for i in 0..d {
-        let lookup = packed_tuple_lookup::Config::new(
-            config.logical_len,
-            config.comparison_table::<F>(i)?,
-            config.repetitions,
-        )
-        .map_err(convert)?;
-        comparisons.push(
-            B::prove(
-                trans,
-                &lookup,
-                helper,
-                statistics,
-                &[digits[i], &borrow_oracles[i], &borrow_oracles[i + 1]],
-            )
-            .map_err(convert)?,
-        );
-    }
+    let requests = comparison_requests::<F>(config)?;
+    let registry: Vec<_> = digits
+        .iter()
+        .copied()
+        .chain(borrow_oracles.iter())
+        .collect();
+    let comparisons = B::prove_comparisons(trans, &requests, helper, statistics, &registry)?;
     Ok(Proof {
         borrow_commitments,
         linear,
@@ -403,7 +395,9 @@ where
     bind::<F, H, C>(trans, config, source, digits)?;
     bind_helper::<F, H, C>(trans, helper, source.parameters)?;
     let d = config.num_digits::<F>()?;
-    if proof.borrow_commitments.len() != d + 1 || proof.comparisons.len() != d {
+    if proof.borrow_commitments.len() != d + 1
+        || proof.comparisons.len() != B::comparison_packets(d)
+    {
         return Err(error("decomposition proof counts"));
     }
     trans.append_message(
@@ -437,29 +431,16 @@ where
         &proof.linear,
     )
     .map_err(convert)?;
-    for i in 0..d {
-        let lookup = packed_tuple_lookup::Config::new(
-            config.logical_len,
-            config.comparison_table::<F>(i)?,
-            config.repetitions,
-        )
-        .map_err(convert)?;
-        let columns = [
-            VerifierOracle {
-                parameters: digits[i].parameters,
-                commitment: digits[i].commitment,
-            },
-            VerifierOracle {
-                parameters: source.parameters,
-                commitment: borrow_oracles[i].commitment,
-            },
-            VerifierOracle {
-                parameters: source.parameters,
-                commitment: borrow_oracles[i + 1].commitment,
-            },
-        ];
-        B::verify(trans, &lookup, helper, &columns, &proof.comparisons[i]).map_err(convert)?;
-    }
+    let requests = comparison_requests::<F>(config)?;
+    let registry: Vec<_> = digits
+        .iter()
+        .chain(&borrow_oracles)
+        .map(|s| VerifierOracle {
+            parameters: s.parameters,
+            commitment: s.commitment,
+        })
+        .collect();
+    B::verify_comparisons(trans, &requests, helper, &registry, &proof.comparisons)?;
     Ok(())
 }
 /// Extract duplicated external-product input halves in the same physical layout
@@ -570,6 +551,25 @@ fn convert(e: impl std::fmt::Display) -> Error {
     Error(e.to_string())
 }
 
+fn comparison_requests<F: PrimeField>(
+    config: &Config,
+) -> Result<Vec<crate::packed_extension_lookup::deferred::Request<F>>, Error> {
+    let d = config.num_digits::<F>()?;
+    (0..d)
+        .map(|i| {
+            Ok(crate::packed_extension_lookup::deferred::Request {
+                config: packed_tuple_lookup::Config::new(
+                    config.logical_len,
+                    config.comparison_table::<F>(i)?,
+                    config.repetitions,
+                )
+                .map_err(convert)?,
+                source_slots: vec![i, d + i, d + i + 1],
+            })
+        })
+        .collect()
+}
+
 pub(crate) trait Backend<F, H, C>
 where
     F: PrimeField + Serialize,
@@ -579,6 +579,47 @@ where
     type Proof;
     const EXTENSION: bool = false;
     fn bind_domain(_trans: &mut Transcript<F>) {}
+    fn comparison_packets(limbs: usize) -> usize {
+        limbs
+    }
+    fn prove_comparisons(
+        trans: &mut Transcript<F>,
+        requests: &[crate::packed_extension_lookup::deferred::Request<F>],
+        helper: Option<&pcs::matrix_weighted::Parameters<C>>,
+        statistics: &mut crate::packed_lane_lookup::ProverStatistics,
+        registry: &[&ProverOracle<'_, F, H, C>],
+    ) -> Result<Vec<Self::Proof>, Error> {
+        requests
+            .iter()
+            .map(|request| {
+                let sources: Vec<_> = request.source_slots.iter().map(|&i| registry[i]).collect();
+                Self::prove(trans, &request.config, helper, statistics, &sources)
+            })
+            .collect()
+    }
+    fn verify_comparisons(
+        trans: &mut Transcript<F>,
+        requests: &[crate::packed_extension_lookup::deferred::Request<F>],
+        helper: Option<&pcs::matrix_weighted::Parameters<C>>,
+        registry: &[VerifierOracle<'_, H::Output, C>],
+        proofs: &[Self::Proof],
+    ) -> Result<(), Error> {
+        if proofs.len() != requests.len() {
+            return Err(error("comparison packet count"));
+        }
+        for (request, proof) in requests.iter().zip(proofs) {
+            let sources: Vec<_> = request
+                .source_slots
+                .iter()
+                .map(|&i| VerifierOracle {
+                    parameters: registry[i].parameters,
+                    commitment: registry[i].commitment,
+                })
+                .collect();
+            Self::verify(trans, &request.config, helper, &sources, proof)?;
+        }
+        Ok(())
+    }
     fn prove(
         trans: &mut Transcript<F>,
         config: &packed_tuple_lookup::Config<F>,
