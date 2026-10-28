@@ -80,6 +80,16 @@ pub fn prove_with_terminal_values<F: PrimeField + Serialize>(
     prove_with_rounds(trans, shape, factors, |_, _, _| Ok(()))
 }
 
+/// Prove against borrowed original factor tables without cloning full witnesses.
+/// Arithmetic order and transcript match the owned-table entry point.
+pub fn prove_with_borrowed_terminal_values<F: PrimeField + Serialize>(
+    trans: &mut Transcript<F>,
+    shape: &PackedShape<F>,
+    factors: &[impl std::borrow::Borrow<PackedTable<F>> + Sync],
+) -> Result<(ZeroProof<F>, ZeroSubclaim<F>, Vec<Vec<F>>), Error> {
+    prove_with_rounds(trans, shape, factors, |_, _, _| Ok(()))
+}
+
 /// Prove with an oracle-fold callback after each original-factor challenge.
 /// The special first ZeroCheck round is callback zero; subsequent callbacks
 /// precede the next packed-sumcheck challenge. Empty callbacks preserve the
@@ -87,7 +97,7 @@ pub fn prove_with_terminal_values<F: PrimeField + Serialize>(
 pub fn prove_with_rounds<F, T>(
     trans: &mut Transcript<F>,
     shape: &PackedShape<F>,
-    factors: &[PackedTable<F>],
+    factors: &[impl std::borrow::Borrow<PackedTable<F>> + Sync],
     mut after_challenge: T,
 ) -> Result<(ZeroProof<F>, ZeroSubclaim<F>, Vec<Vec<F>>), Error>
 where
@@ -105,7 +115,7 @@ where
     let eq = mixed_equality(shape, &equality, &mixing)?;
     let mut folded = factors
         .par_iter()
-        .map(|t| t.fold(&pair).map_err(shape_error))
+        .map(|t| t.borrow().fold(&pair).map_err(shape_error))
         .collect::<Result<Vec<_>, _>>()?;
     folded.push(eq.clone());
     let reduced = reduced_shape(shape);
@@ -372,4 +382,49 @@ fn reduce<F: PrimeField + Serialize>(
         })
         .collect();
     Ok((pair, mixing, claim))
+}
+
+#[cfg(test)]
+mod borrowed_tests {
+    use super::*;
+    fn equivalent<F: PrimeField + Serialize + From<usize>>() {
+        let shape = PackedShape {
+            num_vars: 3,
+            width: 2,
+            num_factors: 3,
+            terms: vec![(F::one(), vec![0, 1]), (-F::one(), vec![2])],
+        };
+        let a: Vec<_> = (0usize..16).map(|i| F::from(i + 1)).collect();
+        let b: Vec<_> = (0usize..16).map(|i| F::from(i + 7)).collect();
+        let c = a.iter().zip(&b).map(|(&a, &b)| a * b).collect();
+        let tables: Vec<_> = [a, b, c]
+            .into_iter()
+            .map(|v| PackedTable::new(3, 2, v).unwrap())
+            .collect();
+        let mut owned = Transcript::new_direct();
+        let mut borrowed = Transcript::new_direct();
+        let (a, _, av) = prove_with_terminal_values(&mut owned, &shape, &tables).unwrap();
+        let (b, _, bv) = prove_with_borrowed_terminal_values(
+            &mut borrowed,
+            &shape,
+            &tables.iter().collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert_eq!(
+            bincode::serde::encode_to_vec(&(a, av), bincode::config::standard()).unwrap(),
+            bincode::serde::encode_to_vec(&(b, bv), bincode::config::standard()).unwrap()
+        );
+        assert_eq!(
+            owned.get_challenge(b"after"),
+            borrowed.get_challenge(b"after")
+        );
+    }
+    #[test]
+    fn babybear_borrowed_wire() {
+        equivalent::<algebra::BabyBear>();
+    }
+    #[test]
+    fn goldilocks_borrowed_wire() {
+        equivalent::<algebra::Goldilocks>();
+    }
 }
