@@ -69,7 +69,7 @@ impl Config {
             .num_digits::<F>()
             .map_err(convert)
     }
-    fn decomposition<F: NTTField>(&self) -> Result<packed_decomposition::Config, Error> {
+    pub(crate) fn decomposition<F: NTTField>(&self) -> Result<packed_decomposition::Config, Error> {
         packed_decomposition::Config::new::<F>(self.bits, 2 * self.n, self.repetitions)
             .map_err(convert)
     }
@@ -285,6 +285,31 @@ where
     C: RowCode<F> + Serialize,
     B: packed_decomposition::Backend<F, H, C>,
 {
+    prove_retained::<F,H,C,B>(trans,pp,helper,key,final_acc,output_a,output_b,coefficients,None)
+}
+
+/// Owned canonical comparison sources for the complete outer batch prover.
+pub(crate) struct ComparisonWitness<F,H:Hash+Send+Sync> {
+    pub(crate) coefficients: Vec<pcs::matrix_weighted::State<F,H>>,
+    pub(crate) borrows: Vec<pcs::matrix_weighted::State<F,H>>,
+}
+pub(crate) fn prove_retained<F, H, C, B>(
+    trans: &mut Transcript<F>,
+    pp: &Parameters<C>,
+    helper: &Parameters<C>,
+    key: &ProverKey<F, H>,
+    final_acc: &[F],
+    output_a: &[F],
+    output_b: F,
+    coefficients: &[PackedTable<F>],
+    retain: Option<&mut Option<ComparisonWitness<F,H>>>,
+) -> Result<Proof<F, H::Output, packed_decomposition::Proof<F, H::Output, B::Proof>>, Error>
+where
+    F: NTTField + Serialize,
+    H: Hash + Send + Sync,
+    C: RowCode<F> + Serialize,
+    B: packed_decomposition::Backend<F, H, C>,
+{
     let expected = &key.expected;
     let cfg = &expected.config;
     let d = cfg.digits::<F>()?;
@@ -358,13 +383,15 @@ where
         state: &input_state,
         table: &input,
     };
-    let decomposition = packed_decomposition::prove_impl::<F, H, C, B>(
+    let mut borrow_owner = None;
+    let decomposition = packed_decomposition::prove_retained::<F, H, C, B>(
         trans,
         &cfg.decomposition::<F>()?,
         &source,
         Some(helper),
         &co[..d].iter().collect::<Vec<_>>(),
         &mut crate::packed_lane_lookup::ProverStatistics::default(),
+        if retain.is_some() {Some(&mut borrow_owner)} else {None},
     )
     .map_err(convert)?;
     let (mask, target) = extraction_tables::<F, C>(pp, cfg, final_acc, output_a, output_b)?;
@@ -388,6 +415,10 @@ where
     let opening = pp
         .open::<F, H>(trans, &roots[d], &states[d], &subclaim.query, &value)
         .map_err(convert)?;
+    if let Some(sink) = retain {
+        *sink = Some(ComparisonWitness { coefficients: states,
+            borrows: borrow_owner.ok_or_else(|| error("missing key-switch comparison owner"))? });
+    }
     Ok(Proof {
         coefficients: roots,
         evaluations,
