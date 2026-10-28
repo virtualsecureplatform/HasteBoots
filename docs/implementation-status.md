@@ -7,6 +7,13 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Two serial complete encrypted masked-PBS profile processes now verify eight
+version-10/11 proofs and 3,924 actual child openings. All complete proof hashes
+reproduce exactly. The version-11 timing gain is only 1.0–2.1% for BabyBear and
+mixed for Goldilocks on the small one-query fixture. The original latency gate
+is not met. See `complete-masked-pbs-profile.md`; original-size/security,
+aggregation, hiding and independent-review requirements remain open.
+
 Masked preflight now omits the high coefficient half selected out by the fixed
 final `(I, 0)` query. The proof still authenticates the complete padded source.
 Frozen comparisons preserve full proof bytes and transcripts; BabyBear component
