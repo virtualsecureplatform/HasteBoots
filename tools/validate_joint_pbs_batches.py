@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit complete 1/4/16 PBS batch logs and a conservative interactive inventory.
+"""Audit caller-selected complete PBS schedules (default 1/4/16).
 
 Not a hash, Fiat-Shamir, knowledge, hiding, or whole-security certificate.
 The joint fixed-word PCS adaptation still requires independent review.
@@ -59,9 +59,12 @@ def conservative_errors(record,layouts):
                           lookup_backend='shared-extension')
     return {name:count*error for name,error in full_bounds(standalone,layouts).items()}
 
-def validate(text,field,full=True,mode='joint-hadamard',reference_text=None):
+def validate(text,field,full=True,mode='joint-hadamard',reference_text=None,*,schedule=(1,4,16)):
     if field not in ('babybear','goldilocks') or mode not in MODES or type(full) is not bool:
         raise ValueError('unsupported field/mode/geometry selection')
+    if not isinstance(schedule,(tuple,list)) or not schedule or any(type(n) is not int or n<1 for n in schedule):
+        raise ValueError('nonempty trusted positive batch schedule required')
+    schedule=tuple(schedule)
     layouts={};packets=[];members=[];inventories=[]
     for line in text.splitlines():
         if line.startswith('HB_FULL_PCS '):
@@ -71,13 +74,13 @@ def validate(text,field,full=True,mode='joint-hadamard',reference_text=None):
         elif line.startswith('HB_FULL_BATCH_PBS '):packets.append(json.loads(line.split(' ',1)[1]))
         elif line.startswith('HB_BATCH_MEMBER '):members.append(json.loads(line.split(' ',1)[1]))
         elif line.startswith('HB_BATCH_ROOTS '):inventories.append(json.loads(line.split(' ',1)[1]))
-    if len(packets)!=3 or [p.get('batch_size') for p in packets]!=[1,4,16] or len(members)!=21 or len(inventories)!=3:
-        raise ValueError('complete ordered 1/4/16 batch schedule required')
+    if len(packets)!=len(schedule) or tuple(p.get('batch_size') for p in packets)!=schedule or len(members)!=sum(schedule) or len(inventories)!=len(schedule):
+        raise ValueError('complete caller-selected ordered batch schedule required')
     gold=field=='goldilocks';p,k,degree,extra=(2**64-2**32+1,4,3,0) if gold else (2013265921,8,6,1)
     ndigits=((p-1).bit_length()+7)//8;sdigits=((p-1).bit_length()+4)//5
     roots_per_member=8*ndigits+4*sdigits+15
     seen_proofs=set();seen_statements=set();errors=[];offset=0
-    for packet,inventory,count in zip(packets,inventories,[1,4,16]):
+    for packet,inventory,count in zip(packets,inventories,schedule):
         expected=dict(field=field,mode=mode,prime=p,width=k,lookup_field_degree=degree,
             helper_left_extra=extra,full_parameters=full,seed=42,polynomial_size=1024 if full else 32,
             input_dimension=728 if full else 32,output_dimension=728 if full else 32,
@@ -114,17 +117,19 @@ def validate(text,field,full=True,mode='joint-hadamard',reference_text=None):
         offset+=count
         errors.append(sum(conservative_errors(packet,layouts).values(),Fraction()))
     union=sum(errors,Fraction())
-    if union>Fraction(1,2**128):raise ValueError('conditional 21-member interactive inventory misses threshold')
-    result=dict(field=field,mode=mode,full_parameters=full,batch_sizes=[1,4,16],packets=packets,
+    if union>Fraction(1,2**128):raise ValueError('conditional scheduled-member interactive inventory misses threshold')
+    result=dict(field=field,mode=mode,full_parameters=full,batch_sizes=list(schedule),packets=packets,
         members=members,layouts=layouts,inventories=inventories,
-        conditional_21_member_interactive_bits=-math.log2(float(union)),
+        conditional_interactive_bits=-math.log2(float(union)),
         scope=('complete cross-statement Hadamard and comparison authentication with canonical source deduplication' if mode=='joint-comparisons' else 'independent standalone v5 PBS proofs' if mode=='separate-v5' else
                'complete cross-statement Hadamard authentication with per-member remaining PBS constraints'
                + (' and canonical source deduplication' if mode=='canonical-sources' else '')),
         whole_proof_security_certified=False)
+    if schedule==(1,4,16):
+        result['conditional_21_member_interactive_bits']=result['conditional_interactive_bits']
     if reference_text is not None:
         refs=[json.loads(s.split(' ',1)[1]) for s in reference_text.splitlines() if s.startswith('HB_FULL_PBS ')]
-        if len(refs)!=21:raise ValueError('21 native reference statements required')
+        if len(refs)!=sum(schedule):raise ValueError('native reference schedule count mismatch')
         ref_layout_rows=[json.loads(s.split(' ',1)[1]) for s in reference_text.splitlines() if s.startswith('HB_FULL_PCS ')]
         ref_layouts={r.get('role'):r for r in ref_layout_rows}
         if len(ref_layout_rows)!=4 or ref_layouts!=layouts:

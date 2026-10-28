@@ -85,3 +85,22 @@ class JointBatchTests(unittest.TestCase):
         # All four contexts must be unpadded for the conditional joint PCS bound.
         bad=copy.deepcopy(data);bad[0][1]['block_width']=8
         with self.assertRaises(ValueError):validate(encode(*bad),'goldilocks',mode='joint-comparisons')
+
+    def test_repeated_single_proofs_require_explicit_trusted_schedule(self):
+        layouts,packets,members,inventories,_=fixture('joint-comparisons')
+        packets=[copy.deepcopy(packets[0]) for _ in range(2)]
+        members=[copy.deepcopy(members[0]) for _ in range(2)]
+        inventories=[copy.deepcopy(inventories[0]) for _ in range(2)]
+        for i in range(2):
+            digest=f'{i+100:064x}'
+            packets[i]['proof_sha256']=digest
+            members[i].update(proof_sha256=digest,statement_sha256=f'{i+200:064x}')
+            inventories[i]['proof_sha256']=digest
+        text=encode(layouts,packets,members,inventories)
+        with self.assertRaises(ValueError):validate(text,'goldilocks',mode='joint-comparisons')
+        result=validate(text,'goldilocks',mode='joint-comparisons',schedule=(1,1))
+        self.assertEqual(result['batch_sizes'],[1,1])
+        self.assertGreater(result['conditional_interactive_bits'],128)
+        self.assertNotIn('conditional_21_member_interactive_bits',result)
+        for schedule in [(),(True,),(-1,),(1,)]:
+            with self.assertRaises(ValueError):validate(text,'goldilocks',mode='joint-comparisons',schedule=schedule)
