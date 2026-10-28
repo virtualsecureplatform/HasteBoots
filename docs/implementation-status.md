@@ -7,6 +7,15 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Fresh complete binding audits now cover the joint-source backend in both
+versions 10 and 11 over both selected fields. All 60 new certificates pass
+strict actual-root/NTT replay: four controls accepted and 56 attacks rejected
+at the intended stages. Both transcript comparisons match, including a new
+32-byte check. All 80 default SNARK tests remain green. See
+`canonical-joint-fresh-binding-audit.md`. Fresh false-lookup composition cases,
+secure encrypted/original-size adversarial audits and independent review remain
+open, along with the original security/performance and full aggregation gates.
+
 A distinct trusted joint-source canonical backend now composes complete version-
 10/11 encrypted PBS proofs. Eight serialized/decoded complete proofs verify in
 two isolated repetitions with identical full hashes and original native key

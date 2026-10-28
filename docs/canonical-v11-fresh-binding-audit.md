@@ -83,3 +83,13 @@ unchanged. The final eighty-test default suite passes after that cleanup.
 The archive checker confirms that this wrapper removal is the only source-code
 difference between the manual execution snapshot and final sources. Final
 sources, checked certificate records and logs are archived in the same directory.
+
+## Joint backend follow-up
+
+The canonical joint-source backend now has 60 additional opt-in fresh complete
+cases across versions 10/11 and both fields. Its control/attack obligations reuse
+this driver and strict reference replay. All backends now also compare a separate
+32-byte end-of-proof challenge and record full proof hashes and rejection stages.
+The original independent masked case names remain unchanged. There are 120
+opt-in masked cases in total; see `canonical-joint-fresh-binding-audit.md` for
+current joint results, record validation and remaining scope limitations.

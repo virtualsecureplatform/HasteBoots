@@ -6,7 +6,7 @@ use algebra::Basis;
 use mode::AuditStages;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::de::DeserializeOwned;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Attack {
     Control,
@@ -64,7 +64,7 @@ fn make<F, EF, P, D>(
 ) -> (
     StatementData<F>,
     BackendProof<F, [u8; 32], P::SingleProof, P::BatchProof, D::Decomposition, D::KeySwitch>,
-    F,
+    (F, [u8; 32]),
 )
 where
     F: NTTField + Serialize,
@@ -403,8 +403,13 @@ where
         key_switch,
     };
     let digest = trans.get_challenge(b"fresh complete canonical certificate after");
+    let mut transcript_bytes = [0u8; 32];
+    trans.get_challenge_bytes(
+        b"fresh complete canonical certificate bytes after",
+        &mut transcript_bytes,
+    );
     assert_eq!(rows, 32);
-    (s, proof, digest)
+    (s, proof, (digest, transcript_bytes))
 }
 
 struct StatementData<F> {
@@ -604,7 +609,8 @@ fn run<F, EF, P, D>(
     D::Decomposition: Serialize + DeserializeOwned,
     D::KeySwitch: Serialize + DeserializeOwned,
 {
-    let (s, proof, digest) = make::<F, EF, P, D>(pp, setup, attack, 1700 + attack as u64);
+    let (s, proof, (digest, transcript_bytes)) =
+        make::<F, EF, P, D>(pp, setup, attack, 1700 + attack as u64);
     let bytes = bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap();
     let (proof, used): (
         BackendProof<F, [u8; 32], P::SingleProof, P::BatchProof, D::Decomposition, D::KeySwitch>,
@@ -645,9 +651,16 @@ fn run<F, EF, P, D>(
         digest,
         replay.get_challenge(b"fresh complete canonical certificate after")
     );
+    let mut replay_bytes = [0u8; 32];
+    replay.get_challenge_bytes(
+        b"fresh complete canonical certificate bytes after",
+        &mut replay_bytes,
+    );
+    assert_eq!(transcript_bytes, replay_bytes);
     let result = verify_inner::<F, EF, Sha256, P, D>(pp, &expected, &s.borrowed(), &proof);
-    if attack == Attack::Control {
+    let production_error = if attack == Attack::Control {
         result.unwrap();
+        None
     } else {
         let err = result.unwrap_err();
         let label = match attack {
@@ -660,9 +673,10 @@ fn run<F, EF, P, D>(
             _ => "packed accumulator linkage",
         };
         assert!(err.0.contains(label), "{attack:?}: {err}");
-    }
+        Some(err.0)
+    };
     println!(
-        "{} {{\"protocol_version\":{},\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_decomposition_valid\":{:?},\"reference_switch_decomposition_valid\":{:?},\"reference_key_product_valid\":{},\"reference_switch_key_product_valid\":{},\"reference_linkage_valid\":{},\"reference_monomial_valid\":{},\"reference_extraction_valid\":{},\"production_accepted\":{},\"encrypted_profile\":false,\"original_size\":false}}",
+        "{} {{\"protocol_version\":{},\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_decomposition_valid\":{:?},\"reference_switch_decomposition_valid\":{:?},\"reference_key_product_valid\":{},\"reference_switch_key_product_valid\":{},\"reference_linkage_valid\":{},\"reference_monomial_valid\":{},\"reference_extraction_valid\":{},\"production_accepted\":{},\"proof_bytes\":{},\"proof_sha256\":\"{:x}\",\"transcript_bytes\":\"{}\",\"production_error\":{},\"encrypted_profile\":false,\"original_size\":false}}",
         if D::VERSION == 10 {
             "HB_V10_FRESH_LINKAGE_CASE"
         } else {
@@ -679,7 +693,16 @@ fn run<F, EF, P, D>(
         report.accumulator,
         report.monomial,
         report.extraction,
-        attack == Attack::Control
+        attack == Attack::Control,
+        bytes.len(),
+        Sha256::digest(&bytes),
+        transcript_bytes
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
+        production_error
+            .map(|e| format!("{e:?}"))
+            .unwrap_or_else(|| "null".to_owned())
     );
 }
 fn ordinary<F, EF, D>(width: usize)
@@ -808,22 +831,23 @@ fn ordinary_goldilocks_complete_linkage() {
     ordinary::<algebra::Goldilocks, algebra::GoldilocksExtension3, stages::PerLimb>(4);
 }
 
-fn masked<F, EF, D>(width: usize, attack: Attack)
-where
+fn masked_backend<F, EF, P, D>(
+    width: usize,
+    attack: Attack,
+    backend: &str,
+    make: impl Fn(usize, usize) -> P,
+) where
     F: NTTField + Serialize + DeserializeOwned,
     EF: AbstractExtensionField<F> + Serialize + DeserializeOwned,
-    D: AuditStages<F, EF, Sha256, pcs::matrix_weighted::masked_polyfrim::Parameters<F, EF>>,
+    P: CanonicalPcs<F, Sha256, State = pcs::matrix_weighted::masked_polyfrim::State<F, EF, Sha256>>,
+    P::SingleProof: DeserializeOwned,
+    P::BatchProof: DeserializeOwned,
+    D: AuditStages<F, EF, Sha256, P>,
     D::Decomposition: Serialize + DeserializeOwned,
     D::KeySwitch: Serialize + DeserializeOwned,
 {
-    use pcs::matrix_weighted::masked_polyfrim::Parameters as Pp;
     let cfg = Config::new::<F>(32, 21, 8, 5, 1, 1).unwrap();
     let dims = cfg.variables(width).unwrap();
-    let make = |vars: usize, budget: usize| {
-        (vars..24)
-            .find_map(|physical| Pp::<F, EF>::new(vars, width, physical, 2, 1, budget).ok())
-            .unwrap()
-    };
     let cpp = make(dims[0], width + 2);
     let epp = make(dims[0], width + 1);
     let key = make(dims[0], 1);
@@ -895,7 +919,7 @@ where
         &mut StdRng::seed_from_u64(2100 + attack as u64),
     )
     .unwrap();
-    run::<F, EF, _, D>(&pp, &setup, attack, "masked");
+    run::<F, EF, _, D>(&pp, &setup, attack, backend);
     assert!(
         setup
             .br_oracles(&key)
@@ -910,6 +934,36 @@ where
             .iter()
             .all(|s| s.state.spent().unwrap() == 1)
     );
+}
+fn masked<F, EF, D>(width: usize, attack: Attack)
+where
+    F: NTTField + Serialize + DeserializeOwned,
+    EF: AbstractExtensionField<F> + Serialize + DeserializeOwned,
+    D: AuditStages<F, EF, Sha256, pcs::matrix_weighted::masked_polyfrim::Parameters<F, EF>>,
+    D::Decomposition: Serialize + DeserializeOwned,
+    D::KeySwitch: Serialize + DeserializeOwned,
+{
+    use pcs::matrix_weighted::masked_polyfrim::Parameters as Pp;
+    masked_backend::<F, EF, Pp<F, EF>, D>(width, attack, "masked", |vars, budget| {
+        (vars..24)
+            .find_map(|physical| Pp::<F, EF>::new(vars, width, physical, 2, 1, budget).ok())
+            .unwrap()
+    });
+}
+fn joint_masked<F, EF, D>(width: usize, attack: Attack)
+where
+    F: NTTField + Serialize + DeserializeOwned,
+    EF: AbstractExtensionField<F> + Serialize + DeserializeOwned,
+    D: AuditStages<F, EF, Sha256, pcs::matrix_weighted::masked_polyfrim::joint::Parameters<F, EF>>,
+    D::Decomposition: Serialize + DeserializeOwned,
+    D::KeySwitch: Serialize + DeserializeOwned,
+{
+    use pcs::matrix_weighted::masked_polyfrim::joint::Parameters as Pp;
+    masked_backend::<F, EF, Pp<F, EF>, D>(width, attack, "masked-joint", |vars, budget| {
+        (vars..24)
+            .find_map(|physical| Pp::<F, EF>::new(vars, width, physical, 2, 1, budget).ok())
+            .unwrap()
+    });
 }
 macro_rules! masked_case {
     ($name:ident,$f:ty,$e:ty,$width:expr,$attack:ident) => {
@@ -1388,5 +1442,118 @@ masked_case!(
     algebra::GoldilocksExtension3,
     4,
     SwitchCanonical,
+    stages::Shared
+);
+
+// The complete fixture and strict reference replay are shared with the old
+// backend. Only this trusted test parameter type chooses joint source packets.
+macro_rules! joint_backend_cases {
+    ($module:ident, $f:ty, $e:ty, $width:expr, $mode:ty) => {
+        mod $module {
+            use super::*;
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn control() {
+                joint_masked::<$f, $e, $mode>($width, Attack::Control);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn initial() {
+                joint_masked::<$f, $e, $mode>($width, Attack::Initial);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn final_endpoint() {
+                joint_masked::<$f, $e, $mode>($width, Attack::Final);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn addition() {
+                joint_masked::<$f, $e, $mode>($width, Attack::Addition);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn chain() {
+                joint_masked::<$f, $e, $mode>($width, Attack::Chain);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn digit_a() {
+                joint_masked::<$f, $e, $mode>($width, Attack::DigitA);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn digit_b() {
+                joint_masked::<$f, $e, $mode>($width, Attack::DigitB);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn rotation() {
+                joint_masked::<$f, $e, $mode>($width, Attack::Rotation);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn extraction_a() {
+                joint_masked::<$f, $e, $mode>($width, Attack::ExtractionA);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn extraction_b() {
+                joint_masked::<$f, $e, $mode>($width, Attack::ExtractionB);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn key_product() {
+                joint_masked::<$f, $e, $mode>($width, Attack::KeyProduct);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn switch_key_product() {
+                joint_masked::<$f, $e, $mode>($width, Attack::SwitchKeyProduct);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn canonical_a() {
+                joint_masked::<$f, $e, $mode>($width, Attack::CanonicalA);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn canonical_b() {
+                joint_masked::<$f, $e, $mode>($width, Attack::CanonicalB);
+            }
+            #[test]
+            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            fn switch_canonical() {
+                joint_masked::<$f, $e, $mode>($width, Attack::SwitchCanonical);
+            }
+        }
+    };
+}
+joint_backend_cases!(
+    v10_joint_babybear,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    stages::PerLimb
+);
+joint_backend_cases!(
+    v10_joint_goldilocks,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    stages::PerLimb
+);
+joint_backend_cases!(
+    v11_joint_babybear,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    stages::Shared
+);
+joint_backend_cases!(
+    v11_joint_goldilocks,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
     stages::Shared
 );
