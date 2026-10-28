@@ -1,6 +1,6 @@
 import copy
 import unittest
-from joint_pbs_timing import validate_run
+from joint_pbs_timing import validate_run, validate_repeated_wire
 from test_batch_phase_statistics import fixture as phase_fixture
 from test_validate_joint_pbs_batches import fixture,encode
 
@@ -46,3 +46,20 @@ class TimingTests(unittest.TestCase):
         with self.assertRaises(ValueError):validate_run(text(data),'goldilocks','joint-comparisons',reference=result)
         result=validate_run(text(data),'goldilocks','joint-comparisons');result['members'][0]['statement_sha256']='f'*64
         with self.assertRaises(ValueError):validate_run(text(data),'goldilocks','joint-comparisons',reference=result)
+
+    def test_reversed_order_requires_identical_certificates(self):
+        first=validate_run(text(timing_fixture()),'goldilocks','joint-comparisons')
+        second=copy.deepcopy(first)
+        second['packets'][0]['complete_ns']+=10
+        second['phases'][0]['prove_ns']+=10
+        self.assertEqual(validate_repeated_wire(first,second),dict(proofs=2,exact_wire=True))
+        for group,key,value in [('packets','proof_sha256','f'*64),
+                                ('packets','proof_bytes',1),
+                                ('packets','native_keys_sha256','f'*64),
+                                ('packets','statements_sha256','f'*64),
+                                ('members','statement_sha256','f'*64)]:
+            changed=copy.deepcopy(second);changed[group][0][key]=value
+            with self.subTest(key=key),self.assertRaises(ValueError):
+                validate_repeated_wire(first,changed)
+        changed=copy.deepcopy(second);changed['members'].reverse()
+        with self.assertRaises(ValueError):validate_repeated_wire(first,changed)

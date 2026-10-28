@@ -52,6 +52,29 @@ def validate_run(text, field, mode, iterations=2, reference=None, full=True):
     return result
 
 
+def validate_repeated_wire(first, second):
+    """Require the same seeded workload and certificate in reversed orders.
+
+    Call after validate_run on each raw log. Timing and phase durations may vary;
+    the complete proof, ordered statements and trusted configuration may not.
+    """
+    for key in ("field", "mode", "full_parameters", "batch_sizes", "layouts"):
+        if first[key] != second[key]:
+            raise ValueError(f"repeated timing configuration mismatch: {key}")
+    if first["members"] != second["members"]:
+        raise ValueError("repeated timing ordered member/proof mismatch")
+    keys = ("proof_sha256", "proof_bytes", "statements_sha256",
+            "native_keys_sha256", "fhe_parameters_sha256", "seed",
+            "protocol_version", "transcript", "timing_iteration")
+    if len(first["packets"]) != len(second["packets"]):
+        raise ValueError("repeated timing packet count mismatch")
+    for old, new in zip(first["packets"], second["packets"]):
+        for key in keys:
+            if old[key] != new[key]:
+                raise ValueError(f"repeated timing certificate mismatch: {key}")
+    return dict(proofs=len(first["packets"]), exact_wire=True)
+
+
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -131,6 +154,11 @@ def main():
                     (output / (name + ".json")).write_text(json.dumps(result, indent=2) + "\n")
                     results[name] = result
                     completed.append(name)
+        repeated_wire = {}
+        for field in references:
+            for mode in ("separate-v5", "joint-comparisons"):
+                repeated_wire[f"{field}-{mode}"] = validate_repeated_wire(
+                    results[f"native-0-{field}-{mode}"], results[f"native-1-{field}-{mode}"])
         comparisons = []
         for field in references:
             for order in range(2):
@@ -139,7 +167,7 @@ def main():
                 a, b = (statistics.median(p["complete_ns"] for p in r["packets"]) for r in (old, new))
                 comparisons.append(dict(field=field, order=order, baseline_complete_ns=a, candidate_complete_ns=b,
                                         improvement_percent=100 * (1 - b / a)))
-        (output / "summary.json").write_text(json.dumps(dict(comparisons=comparisons, proofs=16,
+        (output / "summary.json").write_text(json.dumps(dict(comparisons=comparisons, proofs=16, repeated_wire=repeated_wire,
             ten_percent_in_both_orders=all(c["improvement_percent"] >= 10 for c in comparisons),
             whole_security_matched=False), indent=2) + "\n")
         save(dict(terminal=True, exit_code=0, completed=completed, proofs=16, do_not_compile_or_test=False))

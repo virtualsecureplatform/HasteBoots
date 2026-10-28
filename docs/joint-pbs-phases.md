@@ -92,3 +92,13 @@ latency/size promotion gates. Frozen build sources are in
 Native 1/4/16 exact-wire validation is separately complete under
 `parallel-scalar-native/`; its correctness-run elapsed times are not paired
 performance evidence.
+
+The timing driver now requires exact ordered member records, proof hashes/bytes,
+statements, native keys, FHE parameters and protocol identities across reversed
+orders, while allowing measured durations to differ. An independent replay of
+all 32 raw-log certificates from the pooled and parallel timing experiments
+passes the same check across builds as well. Digest-linked results are in
+`parallel-pbs-timing/cross-build-wire-check.json`. All 97 Python tests pass,
+including rejection of changed key/proof digests, statements, sizes and member
+ordering. These checks establish deterministic workload/certificate equivalence;
+they do not add a security argument.
