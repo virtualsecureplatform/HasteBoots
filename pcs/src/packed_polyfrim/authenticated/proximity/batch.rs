@@ -1069,3 +1069,6 @@ mod tests {
         fresh_foreign_projection::<algebra::Goldilocks, algebra::GoldilocksExtension3>();
     }
 }
+
+#[cfg(test)]
+mod profile;

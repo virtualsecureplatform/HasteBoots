@@ -29,7 +29,43 @@ the differential-test snapshot is
 The latter adds the direct differential checks and makes the reference entry
 point test-only; the production generator is unchanged.
 
-Canonical adapter and full PBS regression runs are pending. No measured RSS,
-latency improvement, whole-security or original-size validation is claimed.
+All five canonical context/adapter tests pass. Full PBS regression remains
+pending. No latency improvement, whole-security or original-size validation is
+claimed.
 The native Goldilocks run and complete fresh-proof audit launched before this
 change execute their preserved previous binaries, not this generator.
+
+## Separate-process resource control
+
+An ignored test compares retained versus regenerated initial virtual sources
+with 2^15 message rows, width 2, blowup 4, eight sampled queries and dense
+extension-field matrices. It runs each field/batch/mode in a separate process.
+Each child decodes and verifies the proof, including expected virtual-source
+sample values. The driver checks identical fixtures, serialized proofs and
+transcript fingerprints for each pair and captures GNU time peak RSS.
+
+| Field | Queries | Retained peak KiB | Generated peak KiB |
+| --- | ---: | ---: | ---: |
+| BabyBear degree 6 | 1 | 53,904 | 46,712 |
+| BabyBear degree 6 | 4 | 117,004 | 87,620 |
+| BabyBear degree 6 | 16 | 369,540 | 245,868 |
+| Goldilocks degree 3 | 1 | 53,964 | 46,832 |
+| Goldilocks degree 3 | 4 | 117,172 | 86,528 |
+| Goldilocks degree 3 | 16 | 369,116 | 245,880 |
+
+All twelve processes pass. The checked manifest, raw logs, per-process PIDs,
+exit codes and resource records are in `resource-run-1/` under the artifact
+directory above. The frozen `resource-profile` executable and source archive
+hashes are linked by its manifest. `resource-executed-sources.tar.gz` has SHA-256
+`46436771b7a8bd630f3a412d40d4613976f5ea1bb7d5e691ab99bb4bf837d6b4`.
+
+```sh
+cargo test -p pcs --release --lib generated_source_resource_profile --no-run
+python3 tools/profile_generated_sources.py --executable target/performance/generated-query-sources/resource-profile --source-archive target/performance/generated-query-sources/resource-executed-sources.tar.gz --output target/performance/generated-query-sources/resource-run-new
+```
+
+This fixture isolates the virtual-source kernel and directly checks expected
+initial values; it is not the original paired masked-source verifier or a full
+PBS. Production masked component proof hashes are checked separately above.
+These are per-process memory controls taken during other validation work. No
+isolated timing or extrapolated native-size memory result follows from them.

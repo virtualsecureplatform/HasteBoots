@@ -7,6 +7,17 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Masked query aggregation now regenerates one initial virtual source at a time,
+retaining the intermediate ladders. All 70 core tests pass; six masked packet
+fingerprints exactly match the previous implementation. Seven kernel tests
+include direct retained/generated comparisons of bytes, sampled indices and
+32-byte transcript state at batches 1/4/16 in both fields. Five canonical
+context/adapter tests pass. Twelve separate-process resource controls also
+verify matching proofs; 16-query peak RSS drops about 361→240 MiB in the
+2^15-row width-2 fixture. See `generated-query-sources.md`. This does not establish
+native batch fit, whole-PBS security or a timing improvement; full PBS regression
+and the preserved earlier native/audit runs remain pending.
+
 The first original-size masked Goldilocks run terminated at accumulator linkage:
 the copied small-fixture allowance was 12, while the native owner needs 17.
 Canonical opening budgets now derive from the public query schedule and reject
