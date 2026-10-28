@@ -73,8 +73,10 @@ RAYON_NUM_THREADS=1 cargo test -p pcs --release --test masked_aggregated_adapter
 cargo check --workspace --all-targets
 ```
 
-This implementation retains full virtual-source arrays and all intermediate
-ladders during a batch; large native batches need further memory work. A
+The prover now regenerates one full initial virtual source at a time instead
+of retaining every initial source array. It still retains all intermediate
+ladders; large native batches need further memory validation. See
+[virtual-source regeneration](generated-query-sources.md). A
 separate trusted canonical backend and small complete-PBS integration are now
 validated; see [canonical aggregated backend](canonical-aggregated-backend.md). Complete 1/4/16-statement aggregation, robust vector proximity,
 Fiat–Shamir/knowledge/security composition, hiding, original-size complete

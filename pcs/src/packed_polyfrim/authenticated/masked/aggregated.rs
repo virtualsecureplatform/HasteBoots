@@ -100,49 +100,45 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
         let alphas =
             t.get_vec_challenge(b"masked aggregated source combinations v1", queries.len());
         let oracle = pp.oracle(false);
-        let virtual_sources: Vec<_> = alphas
-            .iter()
-            .enumerate()
-            .map(|(i, &alpha)| {
-                let coefficients = session
-                    .source
-                    .polynomial
-                    .coefficients
-                    .chunks_exact(2 * pp.width)
-                    .flat_map(|v| {
-                        v[..pp.width]
-                            .iter()
-                            .zip(&v[pp.width..])
-                            .map(|(&p, &s)| (p + alpha * s).canonicalized())
-                    })
-                    .collect();
-                let values: Vec<_> = session
-                    .source
-                    .values()
-                    .chunks_exact(2 * pp.width)
-                    .flat_map(|v| {
-                        v[..pp.width]
-                            .iter()
-                            .zip(&v[pp.width..])
-                            .map(|(&p, &s)| (p + alpha * s).canonicalized())
-                    })
-                    .collect();
-                let mut tree = MerkleTree::<H>::new();
-                tree.root = identifier::<F, H>(pp, &session.root(), first + i, alpha);
-                super::super::State {
-                    polynomial: Polynomial {
-                        width: pp.width,
-                        coefficients,
-                    },
-                    values: std::sync::OnceLock::from(values),
-                    encoding: oracle.clone(),
-                    tree,
-                    context: hash::<H, _>(&(b"packed PolyFRIM parameters v2", &oracle)),
-                    layer: 0,
-                }
-            })
-            .collect();
-        let sources: Vec<_> = virtual_sources.iter().collect();
+        let source = |i: usize| {
+            let alpha = alphas[i];
+            let coefficients = session
+                .source
+                .polynomial
+                .coefficients
+                .chunks_exact(2 * pp.width)
+                .flat_map(|v| {
+                    v[..pp.width]
+                        .iter()
+                        .zip(&v[pp.width..])
+                        .map(|(&p, &s)| (p + alpha * s).canonicalized())
+                })
+                .collect();
+            let values: Vec<_> = session
+                .source
+                .values()
+                .chunks_exact(2 * pp.width)
+                .flat_map(|v| {
+                    v[..pp.width]
+                        .iter()
+                        .zip(&v[pp.width..])
+                        .map(|(&p, &s)| (p + alpha * s).canonicalized())
+                })
+                .collect();
+            let mut tree = MerkleTree::<H>::new();
+            tree.root = identifier::<F, H>(pp, &session.root(), first + i, alpha);
+            super::super::State {
+                polynomial: Polynomial {
+                    width: pp.width,
+                    coefficients,
+                },
+                values: std::sync::OnceLock::from(values),
+                encoding: oracle.clone(),
+                tree,
+                context: hash::<H, _>(&(b"packed PolyFRIM parameters v2", &oracle)),
+                layer: 0,
+            }
+        };
         let padded: Vec<_> = prepared.iter().map(|p| p.padded.clone()).collect();
         let combined: Vec<Vec<_>> = claims
             .iter()
@@ -155,13 +151,13 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
                     .collect()
             })
             .collect();
-        let (inner, trace) = batch::prove_sources::<F, H>(
+        let (inner, trace) = batch::prove_generated_sources::<F, H>(
             t,
             &oracle,
             &session.root(),
-            &sources,
             &padded,
             &combined,
+            source,
         )?;
         let consistency_sources = trace
             .consistency

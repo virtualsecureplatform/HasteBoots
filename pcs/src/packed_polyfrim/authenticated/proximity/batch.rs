@@ -142,6 +142,7 @@ fn prove_inner<F: Field + Serialize, H: Hash + Send + Sync>(
     )
     .map(|(proof, _)| proof)
 }
+#[cfg(test)]
 pub(in crate::packed_polyfrim::authenticated) fn prove_sources<
     F: Field + Serialize,
     H: Hash + Send + Sync,
@@ -164,6 +165,114 @@ pub(in crate::packed_polyfrim::authenticated) fn prove_sources<
         rolling_fri::prove_virtual_all::<F, H>,
     )
 }
+// Regenerate one virtual source at a time. Intermediate ladders remain retained,
+// but no collection of full-size initial virtual codewords is kept alive.
+pub(in crate::packed_polyfrim::authenticated) fn prove_generated_sources<
+    F: Field + Serialize,
+    H: Hash + Send + Sync,
+>(
+    t: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    binding: &H::Output,
+    queries: &[Vec<MatrixPair<F>>],
+    claims: &[Vec<F>],
+    mut source: impl FnMut(usize) -> State<F, H>,
+) -> Result<(Proof<F, H::Output>, SourceTrace), Error> {
+    statements(pp, queries, claims)?;
+    let mut layers = Vec::with_capacity(queries.len());
+    let mut roots = Vec::with_capacity(queries.len());
+    for (index, (query, claim)) in queries.iter().zip(claims).enumerate() {
+        let source = source(index);
+        let next = ladder(pp, &source, query, claim)?;
+        roots.push(
+            std::iter::once(source.root())
+                .chain(next.iter().map(State::root))
+                .collect(),
+        );
+        layers.push(next);
+    }
+    t.append_message(b"packed PolyFRIM joint virtual sources v1", &());
+    begin(t, pp, binding, queries, claims, &roots);
+    let mut consistency = Vec::with_capacity(queries.len());
+    let mut consistency_indices = Vec::with_capacity(queries.len());
+    for (index, (query, claim)) in queries.iter().zip(claims).enumerate() {
+        let source = source(index);
+        let states: Vec<_> = std::iter::once(&source)
+            .chain(layers[index].iter())
+            .collect();
+        member(t, index);
+        let (proof, indices) = certificate_traced(t, pp, &states, query, claim, true);
+        consistency.push(proof);
+        consistency_indices.push(indices);
+    }
+    let (weights, identifiers) = project::<F, H>(t, pp, &roots);
+    let mut values: Vec<Vec<F>> = (0..pp.rounds())
+        .map(|layer| vec![F::zero(); pp.len(layer)])
+        .collect();
+    for index in 0..queries.len() {
+        let source = source(index);
+        for (layer, state) in std::iter::once(&source)
+            .chain(layers[index].iter())
+            .take(pp.rounds())
+            .enumerate()
+        {
+            for (sum, cell) in values[layer]
+                .iter_mut()
+                .zip(state.values().chunks_exact(pp.width))
+            {
+                *sum += dot(cell, &weights[layer][index]);
+            }
+        }
+    }
+    for layer in &mut values {
+        for value in layer {
+            *value = value.canonicalized();
+        }
+    }
+    let fri = rolling_fri::Parameters::new(pp.message, pp.blowup, pp.queries, pp.root)
+        .map_err(|_| Error("joint proximity geometry"))?;
+    let (proximity, trace) = rolling_fri::prove_virtual_all::<F, H>(t, &fri, &identifiers, values)
+        .map_err(|e| Error(e.0))?;
+    let mut packed: Vec<Vec<Vec<Pair<F, H::Output>>>> = (0..trace.indices.len())
+        .map(|_| Vec::with_capacity(queries.len()))
+        .collect();
+    for index in 0..queries.len() {
+        let source = source(index);
+        for (sample, position) in trace.indices.iter().enumerate() {
+            packed[sample].push(
+                std::iter::once(&source)
+                    .chain(layers[index].iter())
+                    .enumerate()
+                    .map(|(layer, state)| {
+                        let position = (position >> layer) / 2;
+                        Pair {
+                            values: state.values()
+                                [position * 2 * pp.width..(position + 1) * 2 * pp.width]
+                                .to_vec(),
+                            path: if layer == 0 {
+                                vec![]
+                            } else {
+                                state.tree.query(position)
+                            },
+                        }
+                    })
+                    .collect(),
+            );
+        }
+    }
+    Ok((
+        Proof {
+            consistency,
+            proximity,
+            packed,
+        },
+        SourceTrace {
+            consistency: consistency_indices,
+            proximity: trace.indices,
+        },
+    ))
+}
+
 fn prove_sources_inner<F: Field + Serialize, H: Hash + Send + Sync>(
     t: &mut Transcript<F>,
     pp: &Parameters<F>,
@@ -477,6 +586,48 @@ mod tests {
                         .collect()
                 })
                 .collect();
+            // The sequential source factory must preserve the previous retained
+            // virtual-source proof, indices and full transcript byte for byte.
+            let mut retained_t = Transcript::new_direct_extension::<B>();
+            let retained = prove_sources::<E, Sha256>(
+                &mut retained_t,
+                &pp,
+                &source.root(),
+                &vec![&source; count],
+                &queries,
+                &claims,
+            )
+            .unwrap();
+            let mut generated_t = Transcript::new_direct_extension::<B>();
+            let mut generations = 0;
+            let generated = prove_generated_sources::<E, Sha256>(
+                &mut generated_t,
+                &pp,
+                &source.root(),
+                &queries,
+                &claims,
+                |_| {
+                    generations += 1;
+                    super::super::super::commit::<E, Sha256>(
+                        &pp,
+                        Polynomial::from_table(&table).unwrap(),
+                    )
+                    .unwrap()
+                },
+            )
+            .unwrap();
+            assert_eq!(generations, 4 * count);
+            assert_eq!(
+                bincode::serde::encode_to_vec(&retained.0, bincode::config::standard()).unwrap(),
+                bincode::serde::encode_to_vec(&generated.0, bincode::config::standard()).unwrap(),
+            );
+            assert_eq!(retained.1.consistency, generated.1.consistency);
+            assert_eq!(retained.1.proximity, generated.1.proximity);
+            let mut retained_after = [0; 32];
+            let mut generated_after = [0; 32];
+            retained_t.get_challenge_bytes(b"source regeneration after", &mut retained_after);
+            generated_t.get_challenge_bytes(b"source regeneration after", &mut generated_after);
+            assert_eq!(retained_after, generated_after);
             let mut wrong = claims.clone();
             wrong[count - 1][0] = (wrong[count - 1][0] + E::one()).canonicalized();
             let mut attempted = Transcript::new_direct_extension::<B>();
