@@ -22,7 +22,7 @@ pub struct Parameters<'a, P> {
     pub final_stage: final_stage::Parameters<'a, P>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Proof<F: Field, EF: Field, O, S, B> {
+pub struct BackendProof<F: Field, O, S, B, D, K> {
     pub protocol_version: u32,
     pub coefficients: Vec<Commitment<O>>,
     pub evaluations: Vec<Commitment<O>>,
@@ -31,11 +31,21 @@ pub struct Proof<F: Field, EF: Field, O, S, B> {
     pub final_accumulator: Vec<F>,
     pub hadamard: relation::CanonicalRelationProof<F, S>,
     pub ntt: Vec<ntt::CanonicalProof<F, B>>,
-    pub decomposition: Vec<decomp::canonical::Proof<F, EF, O, S, B>>,
+    pub decomposition: Vec<D>,
     pub accumulator: acc::CanonicalProof<F, B>,
     pub monomial: mono::canonical::Proof<F, O, B, S>,
-    pub key_switch: final_stage::Proof<F, EF, O, S, B>,
+    pub key_switch: K,
 }
+/// Existing complete version-10 spelling and serialized field order.
+pub type Proof<F, EF, O, S, B> = BackendProof<
+    F,
+    O,
+    S,
+    B,
+    decomp::canonical::Proof<F, EF, O, S, B>,
+    final_stage::Proof<F, EF, O, S, B>,
+>;
+mod stages;
 #[derive(Serialize)]
 struct PublicStatement<F> {
     left_a: Vec<F>,
@@ -167,6 +177,7 @@ where
     .map(|p| p.context().map_err(convert))
     .collect()
 }
+#[cfg(test)]
 fn bind<F, EF, H, P>(
     trans: &mut Transcript<F>,
     pp: &Parameters<'_, P>,
@@ -184,6 +195,26 @@ where
     H: Hash + Send + Sync,
     P: CanonicalPcs<F, H>,
 {
+    bind_inner::<F, EF, H, P, stages::PerLimb>(trans, pp, setup, s, co, ev, inputs, acc, final_acc)
+}
+fn bind_inner<F, EF, H, P, M>(
+    trans: &mut Transcript<F>,
+    pp: &Parameters<'_, P>,
+    setup: &VerifierSetup<H::Output>,
+    s: &PublicStatement<F>,
+    co: &[Commitment<H::Output>],
+    ev: &[Commitment<H::Output>],
+    inputs: &[Commitment<H::Output>],
+    acc: &[Commitment<H::Output>],
+    final_acc: &[F],
+) -> Result<(), Error>
+where
+    F: NTTField + Serialize,
+    EF: AbstractExtensionField<F>,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    M: stages::Mode,
+{
     validate::<F, EF, H, P>(pp, setup)?;
     let count = 2 * setup
         .config
@@ -200,9 +231,9 @@ where
         return Err(error("canonical source or endpoint counts"));
     }
     trans.append_message(
-        b"HasteBoots complete canonical-backend binary NAND PBS v10",
+        M::DOMAIN,
         &(
-            PROTOCOL_VERSION,
+            M::VERSION,
             EF::D,
             setup,
             contexts::<F, H, P>(pp)?,
@@ -318,6 +349,27 @@ where
     P: CanonicalPcs<F, H>,
     R: Rng + CryptoRng,
 {
+    prove_inner::<F, EF, H, P, R, stages::PerLimb>(pp, setup, s, trace, rng, stats)
+}
+fn prove_inner<F, EF, H, P, R, D>(
+    pp: &Parameters<'_, P>,
+    setup: &canonical_setup::ProverSetup<F, H, P>,
+    s: &Statement<'_, F>,
+    trace: &PBSTrace<F>,
+    rng: &mut R,
+    stats: &mut ProverStatistics,
+) -> Result<
+    BackendProof<F, H::Output, P::SingleProof, P::BatchProof, D::Decomposition, D::KeySwitch>,
+    Error,
+>
+where
+    F: NTTField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    R: Rng + CryptoRng,
+    D: stages::Stages<F, EF, H, P>,
+{
     let timer = Instant::now();
     let expected = setup.verifier();
     validate::<F, EF, H, P>(pp, &expected)?;
@@ -361,7 +413,7 @@ where
     let (decomposition_inputs, in_states) = commit::<F, H, P, R>(pp.inputs, &in_tables, rng)?;
     drop(in_tables);
     let mut trans = Transcript::new_direct();
-    bind::<F, EF, H, P>(
+    bind_inner::<F, EF, H, P, D>(
         &mut trans,
         pp,
         &expected,
@@ -415,7 +467,7 @@ where
     let config = cfg.decomposition::<F>()?;
     let decomposition = (0..2)
         .map(|half| {
-            decomp::canonical::prove::<F, EF, H, P, R>(
+            D::decompose(
                 &mut trans,
                 &config,
                 &input[half],
@@ -424,7 +476,6 @@ where
                 &co[half * d..(half + 1) * d].iter().collect::<Vec<_>>(),
                 rng,
             )
-            .map_err(convert)
         })
         .collect::<Result<Vec<_>, _>>()?;
     stats.decomposition += timer.elapsed();
@@ -459,7 +510,7 @@ where
     stats.monomial += timer.elapsed();
     let timer = Instant::now();
     let ks_tables = ks::from_native(width, &trace.key_switching_trace).map_err(convert)?;
-    let key_switch = final_stage::prove::<F, EF, H, P, R>(
+    let key_switch = D::key_switch(
         &mut trans,
         &pp.final_stage,
         setup.switching_key(),
@@ -468,11 +519,10 @@ where
         s.output_b,
         &ks_tables,
         rng,
-    )
-    .map_err(convert)?;
+    )?;
     stats.key_switch += timer.elapsed();
-    Ok(Proof {
-        protocol_version: PROTOCOL_VERSION,
+    Ok(BackendProof {
+        protocol_version: D::VERSION,
         coefficients,
         evaluations,
         decomposition_inputs,
@@ -499,7 +549,29 @@ where
     H: Hash + Send + Sync,
     P: CanonicalPcs<F, H>,
 {
-    if proof.protocol_version != PROTOCOL_VERSION {
+    verify_inner::<F, EF, H, P, stages::PerLimb>(pp, setup, s, proof)
+}
+fn verify_inner<F, EF, H, P, D>(
+    pp: &Parameters<'_, P>,
+    setup: &VerifierSetup<H::Output>,
+    s: &Statement<'_, F>,
+    proof: &BackendProof<
+        F,
+        H::Output,
+        P::SingleProof,
+        P::BatchProof,
+        D::Decomposition,
+        D::KeySwitch,
+    >,
+) -> Result<(), Error>
+where
+    F: NTTField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    D: stages::Stages<F, EF, H, P>,
+{
+    if proof.protocol_version != D::VERSION {
         return Err(error("unsupported canonical complete PBS protocol version"));
     }
     validate::<F, EF, H, P>(pp, setup)?;
@@ -516,7 +588,7 @@ where
     let s = normalized.borrowed();
     let (plan, initial) = public_inputs(cfg, &s)?;
     let mut trans = Transcript::new_direct();
-    bind::<F, EF, H, P>(
+    bind_inner::<F, EF, H, P, D>(
         &mut trans,
         pp,
         setup,
@@ -556,7 +628,7 @@ where
             .map_err(convert)?;
     }
     for half in 0..2 {
-        decomp::canonical::verify::<F, EF, H, P>(
+        D::verify_decomposition(
             &mut trans,
             &cfg.decomposition::<F>()?,
             &input[half],
@@ -570,8 +642,7 @@ where
                 })
                 .collect::<Vec<_>>(),
             &proof.decomposition[half],
-        )
-        .map_err(convert)?;
+        )?;
     }
     let ac: Vec<_> = proof
         .accumulators
@@ -620,7 +691,7 @@ where
         &proof.monomial,
     )
     .map_err(convert)?;
-    final_stage::verify::<F, EF, H, P>(
+    D::verify_key_switch(
         &mut trans,
         &pp.final_stage,
         &setup.ks,
@@ -629,7 +700,6 @@ where
         s.output_b,
         &proof.key_switch,
     )
-    .map_err(convert)
 }
 
 #[cfg(test)]
