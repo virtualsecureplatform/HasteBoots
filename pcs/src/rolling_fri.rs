@@ -296,6 +296,7 @@ where
         .into_iter()
         .enumerate()
         .map(|(layer, values)| {
+            let values = values.into_iter().map(Field::canonicalized).collect();
             let mut tree = MerkleTree::<H>::new();
             tree.root = identifiers[layer];
             State {
@@ -366,12 +367,21 @@ where
         alphas.push(alpha);
         let next = fold(&combined, pp.shift(i), alpha);
         if i + 1 == pp.rounds() {
-            terminal = next[0];
+            terminal = if matches!(virtual_mode, Virtual::All) {
+                next[0].canonicalized()
+            } else {
+                next[0]
+            };
             if strict && next.iter().any(|&v| v != terminal) {
                 return Err(Error("nonconstant terminal"));
             }
             trans.append_message(b"rolling FRI terminal", &terminal);
         } else {
+            let next = if matches!(virtual_mode, Virtual::All) {
+                next.into_iter().map(Field::canonicalized).collect()
+            } else {
+                next
+            };
             let oracle = state::<F, H>(pp, Role::Derived, i + 1, next);
             trans.append_message(b"rolling FRI derived root", &(i + 1, oracle.commitment()));
             combined = oracle
@@ -477,6 +487,17 @@ where
     H: Hash + Send + Sync,
     V: FnMut(usize, usize, &PairOpening<F, H::Output>) -> Result<(), Error>,
 {
+    if matches!(virtual_mode, Virtual::All)
+        && (!proof.terminal.is_canonical()
+            || proof.queries.iter().any(|q| {
+                q.originals
+                    .iter()
+                    .chain(&q.derived)
+                    .any(|p| p.values.iter().any(|v| !v.is_canonical()))
+            }))
+    {
+        return Err(Error("noncanonical virtual-all field encoding"));
+    }
     bind_mode::<F, H>(trans, pp, originals, virtual_mode)?;
     let rounds = pp.rounds();
     if proof.derived.len() != rounds - 1
@@ -569,7 +590,7 @@ fn bind_mode<F: Field + Serialize, H: Hash>(
         match virtual_mode {
             Virtual::None => b"HasteBoots rolling batch FRI v1".as_slice(),
             Virtual::First => b"HasteBoots rolling batch FRI virtual initial v1".as_slice(),
-            Virtual::All => b"HasteBoots rolling batch FRI virtual all v1".as_slice(),
+            Virtual::All => b"HasteBoots rolling batch FRI virtual all v2".as_slice(),
         },
         &(pp.context::<H>(), roots),
     );
@@ -764,6 +785,50 @@ mod tests {
     use serde::de::DeserializeOwned;
     use sha2::Sha256;
 
+    #[test]
+    fn virtual_all_normalizes_and_rejects_lazy_field_bytes() {
+        use algebra::Goldilocks as F;
+        let root = power(F::generate_ntt_table(6).unwrap().root(), 8);
+        let pp = Parameters::new(4, 2, 4, root).unwrap();
+        let lazy = F::new(F::MODULUS_VALUE);
+        let ids = vec![[17u8; 32]; 2];
+        let mut prover = Transcript::new_direct();
+        let (proof, _) = prove_virtual_all::<F, Sha256>(
+            &mut prover,
+            &pp,
+            &ids,
+            vec![vec![lazy; 8], vec![lazy; 4]],
+        )
+        .unwrap();
+        assert!(proof.terminal.is_canonical());
+        assert!(proof.queries.iter().all(|q| {
+            q.originals
+                .iter()
+                .chain(&q.derived)
+                .all(|p| p.values.iter().all(|v| v.is_canonical()))
+        }));
+        let mut verifier = Transcript::new_direct();
+        verify_virtual_all::<F, Sha256, _>(&mut verifier, &pp, &ids, &proof, |_, _, p| {
+            assert!(p.values.iter().all(|v| *v == F::new(0)));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            prover.get_challenge(b"canonical after"),
+            verifier.get_challenge(b"canonical after")
+        );
+        let mut changed = proof;
+        changed.queries[0].originals[0].values[0] = lazy;
+        let error = verify_virtual_all::<F, Sha256, _>(
+            &mut Transcript::new_direct(),
+            &pp,
+            &ids,
+            &changed,
+            |_, _, _| Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(error.0, "noncanonical virtual-all field encoding");
+    }
     fn exercise<F: NTTField + Serialize + DeserializeOwned>() {
         let table = F::generate_ntt_table(6).unwrap();
         let root = table.root();

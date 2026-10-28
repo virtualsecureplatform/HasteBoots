@@ -32,6 +32,7 @@ impl<F: Field + Serialize> Parameters<F> {
         max_openings: usize,
         root: F,
     ) -> Result<Self, Error> {
+        let root = root.canonicalized();
         let padded = message
             .checked_mul(2)
             .ok_or(Error("masked size overflow"))?;
@@ -136,7 +137,7 @@ pub fn commit<F: Field + Serialize, H: Hash + Send + Sync, R: Rng + CryptoRng>(
     let source = super::commit(&pp.oracle(true), paired)?;
     Ok(ProverSession {
         source,
-        context: hash::<H, _>(&(b"masked packed PolyFRIM parameters v1".as_slice(), pp)),
+        context: hash::<H, _>(&(b"masked packed PolyFRIM parameters v2".as_slice(), pp)),
         spent: 0,
     })
 }
@@ -159,6 +160,37 @@ fn padded_query<F: Field + Serialize>(
             .map_err(|_| Error("masked zero"))?,
     });
     Ok(result)
+}
+fn canonical_public<F: Field + Serialize>(
+    pp: &Parameters<F>,
+    query: &[MatrixPair<F>],
+    claim: &[F],
+) -> Result<(Vec<MatrixPair<F>>, Vec<F>), Error> {
+    padded_query(pp, query, claim)?;
+    let query = query
+        .iter()
+        .map(|pair| MatrixPair {
+            zero: Matrix::new(
+                pp.width,
+                pair.zero
+                    .values()
+                    .iter()
+                    .map(|v| v.canonicalized())
+                    .collect(),
+            )
+            .expect("validated width"),
+            one: Matrix::new(
+                pp.width,
+                pair.one
+                    .values()
+                    .iter()
+                    .map(|v| v.canonicalized())
+                    .collect(),
+            )
+            .expect("validated width"),
+        })
+        .collect();
+    Ok((query, claim.iter().map(|v| v.canonicalized()).collect()))
 }
 fn response<F: Field>(
     mut polynomial: Polynomial<F>,
@@ -207,11 +239,14 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
     query: &[MatrixPair<F>],
     claim: &[F],
 ) -> Result<Proof<F, H::Output>, Error> {
-    if session.context != hash::<H, _>(&(b"masked packed PolyFRIM parameters v1".as_slice(), pp))
+    if session.context != hash::<H, _>(&(b"masked packed PolyFRIM parameters v2".as_slice(), pp))
         || session.spent >= pp.max_openings
     {
         return Err(Error("masked parameter context or exhausted lifetime"));
     }
+    let (canonical_query, canonical_claim) = canonical_public(pp, query, claim)?;
+    let query = canonical_query.as_slice();
+    let claim = canonical_claim.as_slice();
     let padded = padded_query(pp, query, claim)?;
     let (data, mask) = split(pp, session);
     let data_claim = response(
@@ -231,6 +266,7 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
         },
         &padded,
     )?;
+    let mask_claim: Vec<_> = mask_claim.into_iter().map(Field::canonicalized).collect();
     let index = session.spent;
     session.spent += 1;
     let alpha = bind(t, pp, &session.root(), index, query, claim, &mask_claim);
@@ -240,7 +276,7 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
         .coefficients
         .iter()
         .zip(&mask.coefficients)
-        .map(|(&p, &s)| p + alpha * s)
+        .map(|(&p, &s)| (p + alpha * s).canonicalized())
         .collect();
     let polynomial = Polynomial {
         width: pp.width,
@@ -254,7 +290,7 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
             v[..pp.width]
                 .iter()
                 .zip(&v[pp.width..])
-                .map(|(&p, &s)| p + alpha * s)
+                .map(|(&p, &s)| (p + alpha * s).canonicalized())
         })
         .collect();
     let oracle = pp.oracle(false);
@@ -264,13 +300,13 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
         polynomial,
         values,
         tree,
-        context: hash::<H, _>(&(b"packed PolyFRIM parameters v1", &oracle)),
+        context: hash::<H, _>(&(b"packed PolyFRIM parameters v2", &oracle)),
         layer: 0,
     };
     let combined: Vec<_> = claim
         .iter()
         .zip(&mask_claim)
-        .map(|(&p, &s)| p + alpha * s)
+        .map(|(&p, &s)| (p + alpha * s).canonicalized())
         .collect();
     let (inner, indices) =
         proximity::prove_source(t, &oracle, &virtual_source, &padded, &combined, true)?;
@@ -304,6 +340,9 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
     claim: &[F],
     proof: &Proof<F, H::Output>,
 ) -> Result<(), Error> {
+    let (canonical_query, canonical_claim) = canonical_public(pp, query, claim)?;
+    let query = canonical_query.as_slice();
+    let claim = canonical_claim.as_slice();
     let padded = padded_query(pp, query, claim)?;
     if proof.index >= pp.max_openings
         || proof.mask_claim.len() != pp.width
@@ -311,6 +350,15 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
         || proof.source_pairs.len() != pp.queries
     {
         return Err(Error("masked proof index or shape"));
+    }
+    if proof.mask_claim.iter().any(|v| !v.is_canonical())
+        || proof
+            .sources
+            .iter()
+            .chain(&proof.source_pairs)
+            .any(|p| p.values.iter().any(|v| !v.is_canonical()))
+    {
+        return Err(Error("noncanonical masked field encoding"));
     }
     let alpha = bind(t, pp, source, proof.index, query, claim, &proof.mask_claim);
     source_verify::<F, H>(
@@ -325,7 +373,7 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
     let combined: Vec<_> = claim
         .iter()
         .zip(&proof.mask_claim)
-        .map(|(&p, &s)| p + alpha * s)
+        .map(|(&p, &s)| (p + alpha * s).canonicalized())
         .collect();
     let wide = pp.oracle(true);
     let mut calls = 0;
@@ -383,11 +431,11 @@ fn bind<F: Field + Serialize, O: Serialize>(
     mask_claim: &[F],
 ) -> F {
     t.append_message(
-        b"masked direct packed PolyFRIM opening v1",
+        b"masked direct packed PolyFRIM opening v2",
         &(pp, source, index, query, claim, mask_claim),
     );
     loop {
-        let alpha = t.get_challenge(b"masked direct packed PolyFRIM alpha v1");
+        let alpha = t.get_challenge(b"masked direct packed PolyFRIM alpha v2");
         if alpha != F::zero() {
             return alpha;
         }
@@ -400,7 +448,7 @@ fn identifier<F: Field + Serialize, H: Hash>(
     alpha: F,
 ) -> H::Output {
     hash::<H, _>(&(
-        b"masked direct packed PolyFRIM virtual source v1".as_slice(),
+        b"masked direct packed PolyFRIM virtual source v2".as_slice(),
         pp,
         source,
         index,
@@ -447,12 +495,12 @@ fn source_projection<F: Field + Serialize, H: Hash>(
     source: &H::Output,
     index: usize,
 ) -> (Vec<F>, Vec<H::Output>) {
-    t.append_message(b"masked packed source proximity v1", &(pp, source, index));
-    let weights = t.get_vec_challenge(b"masked packed source projection v1", 2 * pp.width);
+    t.append_message(b"masked packed source proximity v2", &(pp, source, index));
+    let weights = t.get_vec_challenge(b"masked packed source projection v2", 2 * pp.width);
     let ids = (0..(2 * pp.message).ilog2() as usize)
         .map(|layer| {
             hash::<H, _>(&(
-                b"masked packed source oracle v1".as_slice(),
+                b"masked packed source oracle v2".as_slice(),
                 pp,
                 source,
                 index,
@@ -849,7 +897,7 @@ mod tests {
                 },
                 values,
                 tree,
-                context: hash::<Sha256, _>(&(b"packed PolyFRIM parameters v1", &oracle)),
+                context: hash::<Sha256, _>(&(b"packed PolyFRIM parameters v2", &oracle)),
                 layer: 0,
             };
             let combined: Vec<_> = claim
@@ -957,6 +1005,146 @@ mod tests {
     #[test]
     fn goldilocks_fresh_false_masked_claims() {
         fresh_false_claims::<algebra::Goldilocks>();
+    }
+    #[test]
+    fn goldilocks_aliases_produce_one_masked_wire_and_reject_lazy_proofs() {
+        use algebra::Goldilocks as F;
+        let m = 512;
+        let width = 1;
+        let root = F::generate_ntt_table(11).unwrap().root();
+        let pp = Parameters::new(m, width, 2, 1, 1, root).unwrap();
+        let zero = F::new(0);
+        let lazy = F::new(F::MODULUS_VALUE);
+        let table = PackedTable::new(9, 1, vec![zero; m]).unwrap();
+        let alias = PackedTable::new(9, 1, vec![lazy; m]).unwrap();
+        let query = vec![
+            MatrixPair {
+                zero: Matrix::new(1, vec![zero]).unwrap(),
+                one: Matrix::new(1, vec![F::new(1)]).unwrap()
+            };
+            9
+        ];
+        let alias_query = vec![
+            MatrixPair {
+                zero: Matrix::new(1, vec![lazy]).unwrap(),
+                one: Matrix::new(1, vec![F::new(1)]).unwrap()
+            };
+            9
+        ];
+        let mut a = commit::<F, Sha256, _>(&pp, &table, &mut StdRng::seed_from_u64(8121)).unwrap();
+        let mut b = commit::<F, Sha256, _>(&pp, &alias, &mut StdRng::seed_from_u64(8121)).unwrap();
+        assert_eq!(a.root(), b.root());
+        let mut ta = Transcript::new_direct();
+        let mut tb = Transcript::new_direct();
+        let pa = prove(&mut ta, &pp, &mut a, &query, &[zero]).unwrap();
+        let pb = prove(&mut tb, &pp, &mut b, &alias_query, &[lazy]).unwrap();
+        assert_eq!(
+            bincode::serde::encode_to_vec(&pa, bincode::config::standard()).unwrap(),
+            bincode::serde::encode_to_vec(&pb, bincode::config::standard()).unwrap()
+        );
+        assert_eq!(
+            ta.get_challenge(b"alias after"),
+            tb.get_challenge(b"alias after")
+        );
+        verify::<F, Sha256>(
+            &mut Transcript::new_direct(),
+            &pp,
+            &a.root(),
+            &alias_query,
+            &[lazy],
+            &pa,
+        )
+        .unwrap();
+        let mut changed = pa;
+        assert_eq!(
+            changed.source_proximity.queries[0].originals[1].values[0],
+            zero
+        );
+        changed.source_proximity.queries[0].originals[1].values[0] = lazy;
+        let error = verify::<F, Sha256>(
+            &mut Transcript::new_direct(),
+            &pp,
+            &a.root(),
+            &query,
+            &[zero],
+            &changed,
+        )
+        .unwrap_err();
+        assert_eq!(error.0, "noncanonical virtual-all field encoding");
+    }
+    #[test]
+    fn goldilocks_extension_canonical_wire_preserves_nonbase_coordinates() {
+        use algebra::{AbstractExtensionField, Goldilocks as B, GoldilocksExtension3 as E};
+        let root = E::from_base(B::generate_ntt_table(11).unwrap().root());
+        let pp = Parameters::new(512, 1, 2, 1, 1, root).unwrap();
+        let table = PackedTable::new(
+            9,
+            1,
+            (0..512)
+                .map(|i| E::from_base_fn(|j| B::new((i * (j + 1) + j + 1) as u64)))
+                .collect(),
+        )
+        .unwrap();
+        let alias = PackedTable::new(
+            9,
+            1,
+            (0..512)
+                .map(|i| {
+                    E::from_base_fn(|j| B::new(B::MODULUS_VALUE + (i * (j + 1) + j + 1) as u64))
+                })
+                .collect(),
+        )
+        .unwrap();
+        let zero = E::from_base(B::new(0));
+        let one = E::from_base(B::new(1));
+        let lazy_zero = E::from_base_fn(|j| B::new(if j == 1 { B::MODULUS_VALUE } else { 0 }));
+        let query = vec![
+            MatrixPair {
+                zero: Matrix::new(1, vec![zero]).unwrap(),
+                one: Matrix::new(1, vec![one]).unwrap()
+            };
+            9
+        ];
+        let raw_query = vec![
+            MatrixPair {
+                zero: Matrix::new(1, vec![lazy_zero]).unwrap(),
+                one: Matrix::new(1, vec![one]).unwrap()
+            };
+            9
+        ];
+        let claim = table.evaluate(&query).unwrap();
+        assert_ne!(claim[0].as_base_slice()[1], B::new(0));
+        let mut a = commit::<E, Sha256, _>(&pp, &table, &mut StdRng::seed_from_u64(8122)).unwrap();
+        let mut b = commit::<E, Sha256, _>(&pp, &alias, &mut StdRng::seed_from_u64(8122)).unwrap();
+        assert_eq!(a.root(), b.root());
+        let mut ta = Transcript::new_direct_extension::<B>();
+        let mut tb = Transcript::new_direct_extension::<B>();
+        let pa = prove(&mut ta, &pp, &mut a, &query, &claim).unwrap();
+        let pb = prove(&mut tb, &pp, &mut b, &raw_query, &claim).unwrap();
+        let bytes = bincode::serde::encode_to_vec(&pa, bincode::config::standard()).unwrap();
+        assert_eq!(
+            bytes,
+            bincode::serde::encode_to_vec(&pb, bincode::config::standard()).unwrap()
+        );
+        let (mut decoded, used): (Proof<E, [u8; 32]>, usize) =
+            bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
+        assert_eq!(used, bytes.len());
+        let mut verifier = Transcript::new_direct_extension::<B>();
+        verify::<E, Sha256>(&mut verifier, &pp, &a.root(), &query, &claim, &decoded).unwrap();
+        let after = ta.get_challenge(b"extension canonical after");
+        assert_eq!(after, tb.get_challenge(b"extension canonical after"));
+        assert_eq!(after, verifier.get_challenge(b"extension canonical after"));
+        decoded.source_proximity.queries[0].originals[1].values[0] = lazy_zero;
+        let error = verify::<E, Sha256>(
+            &mut Transcript::new_direct_extension::<B>(),
+            &pp,
+            &a.root(),
+            &query,
+            &claim,
+            &decoded,
+        )
+        .unwrap_err();
+        assert_eq!(error.0, "noncanonical virtual-all field encoding");
     }
     #[test]
     fn capacity_checks() {

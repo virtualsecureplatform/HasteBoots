@@ -117,6 +117,14 @@ where
     if proof.packed.len() != pp.queries || proof.packed.iter().any(|q| q.len() != pp.rounds()) {
         return Err(Error("proximity packed query shape"));
     }
+    if proof
+        .packed
+        .iter()
+        .flatten()
+        .any(|p| p.values.iter().any(|v| !v.is_canonical()))
+    {
+        return Err(Error("noncanonical projected packed encoding"));
+    }
     super::verify_source::<F, H, _>(
         t,
         pp,
@@ -177,16 +185,16 @@ fn project<F: Field + Serialize, H: Hash>(
     pp: &Parameters<F>,
     roots: &[H::Output],
 ) -> (Vec<Vec<F>>, Vec<H::Output>) {
-    t.append_message(b"packed PolyFRIM same-root proximity v1", &(pp, roots));
+    t.append_message(b"packed PolyFRIM same-root proximity v2", &(pp, roots));
     let weights: Vec<_> = (0..pp.rounds())
-        .map(|_| t.get_vec_challenge(b"packed PolyFRIM lane projection v1", pp.width))
+        .map(|_| t.get_vec_challenge(b"packed PolyFRIM lane projection v2", pp.width))
         .collect();
     let identifiers = roots
         .iter()
         .zip(&weights)
         .enumerate()
         .map(|(layer, (root, row))| {
-            hash::<H, _>(&(b"packed PolyFRIM virtual layer v1", pp, layer, root, row))
+            hash::<H, _>(&(b"packed PolyFRIM virtual layer v2", pp, layer, root, row))
         })
         .collect();
     (weights, identifiers)

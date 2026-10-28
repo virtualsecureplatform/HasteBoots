@@ -7,6 +7,16 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+The experimental direct packed backend now has a revision-2 canonical encoding
+contract. Goldilocks and extension coordinates normalize before the new oracle
+and scalar-message encodings, with verifier rejection of noncanonical proof
+entries. The field hooks preserve nonbase extension coordinates and existing
+BabyBear Montgomery encoding. Scalar ordinary/virtual-first behavior and complete
+PBS formats retain their existing paths. All 71 selected field/PCS/adapter/encoder
+tests pass, including base/cubic byte-equivalent proofs and eight repeated rank
+cases. General masking and whole-proof security
+remain open; see `masked-packed-polyfrim.md`.
+
 Direct packed PolyFRIM now has an experimental bounded-reuse masked reference.
 Private high coefficients and an independent vector mask protect the intended
 public-fold view, with separate same-root checks on source/mask lanes and the

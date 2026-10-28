@@ -159,3 +159,10 @@ The bounded-reuse masked reference is now implemented in
 padding, an independent full vector mask, separate source/mask proximity and a
 virtual combined source. Its numerical lifetime/disclosure guard is not a
 zero-knowledge proof; the masking and full-security gates remain open.
+
+The experimental packed protocol now uses revision-2 transcript namespaces and
+canonical field encodings. Virtual-all rolling FRI normalizes original/derived
+messages and rejects noncanonical proof entries; scalar ordinary/virtual-first
+modes retain their existing behavior. See the canonical-encoding section in
+`masked-packed-polyfrim.md`. This revision does not promote the backend or close
+the general soundness/hiding gates.

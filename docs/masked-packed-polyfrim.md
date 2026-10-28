@@ -136,8 +136,9 @@ view and must increase the augmented rank.
 
 This is a finite conditional field-value audit. It does not prove an adaptive
 zero-knowledge theorem, Merkle/random-oracle hiding, a uniform vector-proximity
-bound, or hiding of noncanonical serialized field representations. Hash values,
-challenge dependence and representation bytes require separate analysis. The
+bound, or hiding of hash outputs. Hash values and challenge dependence require
+separate analysis. The canonical representation revision below separately
+constrains field encoding bytes. The
 small-prime/query fixtures are not concrete 128-bit parameter profiles.
 
 All eight rank cases pass, covering sixteen decoded openings, and every negative
@@ -148,3 +149,43 @@ unit tests, four masked adapters, eight ordinary adapters and seven encoders).
 The eight checked records, full log and validated sources are under
 `target/performance/direct-packed-polyfrim-disclosure/`; source SHA-256 is
 `1785caaeefabb3ce6af5a3f785feab8897d4503c93fc21b6fc6e17133831ddac`.
+
+## Canonical encoding revision 2
+
+The experimental packed transcript namespaces now use revision 2. Goldilocks
+admits distinct serialized representatives of the same field element; field-value
+rank equality alone does not cover the additional representation choice. The
+new protocol normalizes source and folded oracle values, virtual original values,
+scalar rolling messages and mask claims before encoding/hashing. Verification
+rejects noncanonical field entries throughout both proximity packets, the vector
+packets and authenticated source pairs. Public matrix/claim aliases normalize at
+the masked API boundary. Private coefficient arithmetic retains its field meaning.
+
+`Field::canonicalized` and `Field::is_canonical` define the representation contract.
+Goldilocks reduces its representative; binomial extensions recurse over every
+base coordinate. Using `Field::new(value())` for extensions would erase nonbase
+coordinates and is deliberately avoided. BabyBear retains its existing unique
+Montgomery representation. Other Field implementations with lazy representations
+must override the identity/default-true hooks consistently with their serializer.
+
+Rolling FRI applies this revision only to virtual-all mode, with a new v2 parent
+domain. Ordinary and virtual-first scalar modes retain their domains and encoding
+behavior. Complete packed PBS versions and FHE parameters are unaffected by this
+experimental backend revision. Historical source/log archives describe their
+original revision and are not overwritten.
+
+The canonical-field invariant makes the honest serialized field entries a fixed
+encoding of the field-value view. It removes the unmodeled representative choice;
+it does not supply the missing general masking, adaptive random-oracle or
+whole-proof security argument.
+
+Validation for revision 2: three algebra encoding tests and all 68 selected PCS/
+adapter/encoder regressions pass (71 total). The base and cubic-extension tests
+use mathematically equal but byte-distinct source/query representations and
+require identical commitment roots, complete proof bytes and final transcript
+challenges. The cubic case retains nonzero higher coordinates and verifies the
+decoded proof with direct extension challenges. Equal-value noncanonical proof
+entries are rejected. All eight cumulative rank cases and their negative controls
+pass again under the new domains. Logs and validated sources are under
+`target/performance/direct-packed-polyfrim-canonical-v2/`, source SHA-256
+`df25739cc8212f0df4d37a7d6e6bbb44fc7348488e3a0a0d92ca1c8ebc496524`.

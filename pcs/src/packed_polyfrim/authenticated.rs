@@ -39,6 +39,7 @@ impl<F: Field + Serialize> Parameters<F> {
         queries: usize,
         root: F,
     ) -> Result<Self, Error> {
+        let root = root.canonicalized();
         rolling_fri::Parameters::new(message, blowup, queries, root)
             .map_err(|_| Error("degree, domain or sampling geometry"))?;
         if width == 0
@@ -138,6 +139,9 @@ fn state<F: Field + Serialize, H: Hash + Send + Sync>(
             values[i * pp.width + lane] = v;
         }
     }
+    for value in &mut values {
+        *value = value.canonicalized();
+    }
     let mut tree = MerkleTree::<H>::new();
     let leaves: Vec<_> = values
         .chunks_exact(2 * pp.width)
@@ -149,7 +153,7 @@ fn state<F: Field + Serialize, H: Hash + Send + Sync>(
         polynomial,
         values,
         tree,
-        context: hash::<H, _>(&(b"packed PolyFRIM parameters v1", pp)),
+        context: hash::<H, _>(&(b"packed PolyFRIM parameters v2", pp)),
         layer,
     }
 }
@@ -174,7 +178,7 @@ fn ladder<F: Field + Serialize, H: Hash + Send + Sync>(
     claim: &[F],
 ) -> Result<Vec<State<F, H>>, Error> {
     pp.query(query, claim)?;
-    if source.layer != 0 || source.context != hash::<H, _>(&(b"packed PolyFRIM parameters v1", pp))
+    if source.layer != 0 || source.context != hash::<H, _>(&(b"packed PolyFRIM parameters v2", pp))
     {
         return Err(Error("source parameter context"));
     }
@@ -214,7 +218,7 @@ fn certificate_traced<F: Field + Serialize, H: Hash + Send + Sync>(
     virtual_source: bool,
 ) -> (Proof<F, H::Output>, Vec<usize>) {
     if virtual_source {
-        t.append_message(b"packed PolyFRIM virtual source v1", &());
+        t.append_message(b"packed PolyFRIM virtual source v2", &());
     }
     let roots: Vec<_> = states[1..].iter().map(|s| s.root()).collect();
     bind(t, pp, &states[0].root(), &roots, query, claim);
@@ -278,8 +282,16 @@ where
     {
         return Err(Error("certificate shape"));
     }
+    if proof
+        .queries
+        .iter()
+        .flatten()
+        .any(|p| p.values.iter().any(|v| !v.is_canonical()))
+    {
+        return Err(Error("noncanonical packed field encoding"));
+    }
     if virtual_source {
-        t.append_message(b"packed PolyFRIM virtual source v1", &());
+        t.append_message(b"packed PolyFRIM virtual source v2", &());
     }
     bind(t, pp, source, &proof.roots, query, claim);
     for openings in &proof.queries {
@@ -340,13 +352,13 @@ fn bind<F: Field + Serialize, O: Serialize>(
     claim: &[F],
 ) {
     t.append_message(
-        b"packed PolyFRIM consistency v1",
+        b"packed PolyFRIM consistency v2",
         &(pp, source, roots, query, claim),
     );
 }
 fn sample<F: Field>(t: &mut Transcript<F>, n: usize) -> usize {
     let mut bytes = [0u8; 8];
-    t.get_challenge_bytes(b"packed PolyFRIM domain index v1", &mut bytes);
+    t.get_challenge_bytes(b"packed PolyFRIM domain index v2", &mut bytes);
     (u64::from_le_bytes(bytes) & (n as u64 - 1)) as usize
 }
 fn hash<H: Hash, T: Serialize>(value: &T) -> H::Output {
@@ -363,7 +375,7 @@ fn leaf<F: Field + Serialize, H: Hash>(
     index: usize,
     values: &[F],
 ) -> H::Output {
-    hash::<H, _>(&(b"packed PolyFRIM pair leaf v1", pp, layer, index, values))
+    hash::<H, _>(&(b"packed PolyFRIM pair leaf v2", pp, layer, index, values))
 }
 fn power<F: Field>(mut b: F, mut n: usize) -> F {
     let mut out = F::one();

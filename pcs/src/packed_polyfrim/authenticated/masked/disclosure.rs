@@ -28,7 +28,7 @@ fn replay_fri<F: Field + Serialize>(
         .map(|&root| rolling_fri::Commitment { root })
         .collect();
     t.append_message(
-        b"HasteBoots rolling batch FRI virtual all v1",
+        b"HasteBoots rolling batch FRI virtual all v2",
         &(pp.context::<Sha256>(), roots),
     );
     let mut alphas = Vec::new();
@@ -71,9 +71,9 @@ fn trace<F: Field + Serialize>(
     let combined: Vec<_> = claim
         .iter()
         .zip(&proof.mask_claim)
-        .map(|(&p, &s)| p + alpha * s)
+        .map(|(&p, &s)| (p + alpha * s).canonicalized())
         .collect();
-    t.append_message(b"packed PolyFRIM virtual source v1", &());
+    t.append_message(b"packed PolyFRIM virtual source v2", &());
     super::super::bind(
         t,
         &oracle,
@@ -85,7 +85,7 @@ fn trace<F: Field + Serialize>(
     let consistency = (0..pp.queries)
         .map(|_| {
             let mut bytes = [0u8; 8];
-            t.get_challenge_bytes(b"packed PolyFRIM domain index v1", &mut bytes);
+            t.get_challenge_bytes(b"packed PolyFRIM domain index v2", &mut bytes);
             (u64::from_le_bytes(bytes) & (oracle.len(0) as u64 - 1)) as usize
         })
         .collect();
@@ -93,11 +93,11 @@ fn trace<F: Field + Serialize>(
         .chain(proof.inner.consistency.roots.iter().copied())
         .collect();
     t.append_message(
-        b"packed PolyFRIM same-root proximity v1",
+        b"packed PolyFRIM same-root proximity v2",
         &(&oracle, &roots),
     );
     let weights: Vec<_> = (0..oracle.rounds())
-        .map(|_| t.get_vec_challenge(b"packed PolyFRIM lane projection v1", pp.width))
+        .map(|_| t.get_vec_challenge(b"packed PolyFRIM lane projection v2", pp.width))
         .collect();
     let ids: Vec<_> = roots
         .iter()
@@ -105,7 +105,7 @@ fn trace<F: Field + Serialize>(
         .enumerate()
         .map(|(layer, (root, row))| {
             hash::<Sha256, _>(&(
-                b"packed PolyFRIM virtual layer v1",
+                b"packed PolyFRIM virtual layer v2",
                 &oracle,
                 layer,
                 root,
