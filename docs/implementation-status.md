@@ -7,6 +7,13 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Fresh complete v10 accumulator-linkage certificates now pass strict child and
+actual-root replay on both backends and selected fields. Four controls are
+accepted and twenty-four endpoint/addition/continuity/digit-view attacks are
+rejected after fresh proof construction. See `canonical-v10-fresh-linkage-audit.md`.
+Other complete attack classes, secure encrypted/original-size audits, joint
+aggregation and security/performance promotion remain open.
+
 Version 10 now composes every original NAND PBS stage through canonical PCS
 backends. Both masked field pairs pass serialized/decoded encrypted N=32, LWE=21
 complete proofs, and Brakedown controls cover all four NAND inputs over both

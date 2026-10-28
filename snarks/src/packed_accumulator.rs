@@ -816,3 +816,6 @@ mod binding_tests {
 
 #[cfg(test)]
 mod canonical_tests;
+
+#[cfg(test)]
+pub(crate) mod audit;

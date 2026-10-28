@@ -73,9 +73,10 @@ fields, yielding eight additional decoded complete certificates.
 
 Version, count, endpoint, child-root and child-proof mutations are rejected.
 These are compatibility/tamper controls, not fresh complete malicious-trace
-certificates. A full version-10 fresh-binding audit remains required; existing
-fresh component certificates and legacy v7/v8/v9 full binding cases do not
-replace it.
+certificates. A separate fresh complete accumulator-linkage audit now covers
+both backends and fields; see `canonical-v10-fresh-linkage-audit.md`. Other attack
+classes and secure encrypted/original-size cases still require full version-10
+audit evidence. Existing component and legacy binding cases do not replace it.
 
 The masked fixtures use one proximity query to test completeness. They are not
 128-bit profiles, original-size native runs or security-matched measurements.

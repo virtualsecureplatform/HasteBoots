@@ -631,3 +631,6 @@ where
     )
     .map_err(convert)
 }
+
+#[cfg(test)]
+mod audit;
