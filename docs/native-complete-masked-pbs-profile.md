@@ -87,3 +87,20 @@ openings before the monomial NTT's additional `width` openings. Goldilocks needs
 17 in that owner. Trusted native allowances must be derived from this operation
 schedule and checked before expensive proving. The original FHE parameters,
 mask-capacity formula and security/performance requirements remain unchanged.
+
+## Corrected-budget run 2
+
+The corrected Goldilocks proof/replay job is tracked under
+`goldilocks-run-2/`, with a separate frozen executable and source bundle. Its
+observed geometry has the required accumulator allowance 17 at physical 21;
+the resource preflight passes before key setup. The failed run-1 artifacts are
+unchanged. Run 2 is pending until its proof, successful terminal records,
+production public verification and fresh-process replay all finish.
+
+Frozen corrected executable SHA-256:
+`bffc32a003b5aa09ada628a1e4a1a8c067cb0a2e3252e942025c670bc19c3361`.
+Executed source bundle SHA-256:
+`32fafeb7aa068f7e276ca01284e6649c932bf4570bec010a5bc717f62f4c4d4e`.
+The same original FHE constants, dimensions, output key, sampling count and
+mask-capacity guard are retained. The allowance fix and its regression evidence
+are detailed in `canonical-opening-budget.md`.

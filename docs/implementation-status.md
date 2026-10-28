@@ -13,7 +13,8 @@ Canonical opening budgets now derive from the public query schedule and reject
 insufficient exposed limits before witness commitments. Remaining key-owner
 allowances are checked before fresh witness allocation. Three budget tests
 pass, and all four complete v10/v11 profiles retain exact archived non-timing
-fields, including proof hashes. The workspace check also passes. See
+fields, including proof hashes. The workspace check also passes. The corrected
+Goldilocks run 2 is live with allowance 17 at physical 21. See
 `canonical-opening-budget.md`. No native complete-proof success is claimed.
 
 Masked ordered batches now share both original-source and query-ladder rolling
