@@ -66,5 +66,9 @@ Run `packed_extension_pbs_babybear6` with
 `--aggregate-hadamard --shared-query-lookups --width 4`. Add
 `--validation-batches` for fresh 1/4/16 groups and `--full` for the original
 ring-1024/LWE-728 parameters. The deferred flag is mutually exclusive. Evidence
-is under `target/performance/shared-pbs/`; original-size correctness is queued
-serially under `target/performance/shared-pbs-native/` after earlier native work.
+is under `target/performance/shared-pbs/`. Original-size correctness is running
+serially under `target/performance/shared-pbs-native/`: all 21 BabyBear proofs
+already pass, matching archived statements, keys, parameters, layouts and root
+inventories; Goldilocks remains in progress. Native BabyBear total bytes across
+those statements fall from 7,590,261,868 to 7,040,575,514 (7.24%) versus v5. No
+comparative native timing claim follows from this correctness run.

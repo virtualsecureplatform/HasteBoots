@@ -14,7 +14,8 @@ tests and 88 Python checks pass, including 42 fresh decoded v8 test certificates
 and twenty reconstructed malicious/control certificates. Frozen toy runs verify
 84 certificates: all 42 v5 wire controls remain exact, and 42 v8 proofs match
 archived statements, keys, FHE parameters and layouts. Aggregate toy bytes fall
-1.56%/2.31% versus v5. Original-size validation is queued. This is within-proof
+1.56%/2.31% versus v5. Original-size BabyBear validation passes all 21 fresh
+statements with archived fixtures matched; Goldilocks is running. This is within-proof
 sharing, not yet cross-statement comparison aggregation or whole-security/
 performance promotion. See `packed-shared-pbs.md`.
 
@@ -46,8 +47,10 @@ and forty reconstructed certificates. Twelve complete wire controls covering 84
 fresh member instances preserve earlier v6/v7 bytes and hashes exactly. At
 sixteen members, eliminating duplicate
 public-key first-fold buffers removes another 0.46875/1.875 GiB of requested
-storage, beyond borrowing the original sources. Native memory and latency gains
-are unmeasured. See `packed-borrowed-batches.md`.
+storage, beyond borrowing the original sources. All six shared-fold native
+certificates now verify, covering 42 fresh statements with exact borrowed-build
+proof bytes/hashes. Observed process peaks are 27,138,660/68,722,196 KiB;
+paired latency/memory gates remain open. See `packed-borrowed-batches.md`.
 
 Complete v6/v7 batch proving now borrows retained source tables instead of
 cloning every Hadamard factor into a second buffer. At native batch size sixteen,
@@ -62,7 +65,8 @@ The original-size frozen v7 owning build has
 completed all six certificates covering 42 fresh statements across both fields,
 with all archived fixtures matched. Borrowed-build native validation also completes
 all six certificates and 42 statements with exact owning-build proof bytes/hashes.
-Shared-fold native validation is now running; those results remain separate.
+Shared-fold native validation also completes all six certificates with exact
+borrowed-build bytes/hashes; its resource observations remain separate.
 
 Opt-in complete outer version 7 now deduplicates repeated canonical Hadamard
 roots under a common query. Every member retains version 6 constraints and every

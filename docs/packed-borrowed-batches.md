@@ -78,5 +78,10 @@ these borrowed-build correctness sessions, compared with
 28,933,600/79,031,708 KiB in the owning-build sessions. These are process
 observations from one serial 1/4/16 run per field. Compilation overlapped the
 sessions, so they do not establish a comparative latency result or close the
-broader performance gates. The later shared-fold native validation is now running
-and must be assessed separately.
+broader performance gates. The later shared-fold native validation also passes
+all six certificates and 42 statements, with exact borrowed-build proof bytes and
+hashes, in `target/performance/shared-fold-pbs-native/`. Its process peaks are
+27,138,660/68,722,196 KiB. BabyBear's whole-process peak is effectively unchanged;
+Goldilocks's observation is lower, consistent with removing folded source copies.
+These remain correctness-session observations rather than paired performance
+promotion evidence.
