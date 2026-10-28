@@ -1,8 +1,11 @@
 //! Algebraic core for direct ordered-matrix PolyFRIM.
 //!
-//! This is not a PCS. It supplies neither authentication, proximity testing nor
-//! hiding. Unlike a scalar fragment reduction, folds retain the original order
+//! This is not a PCS. Its authenticated submodule checks sampled transitions;
+//! proximity testing and hiding remain open. Unlike a scalar fragment reduction, folds retain the original order
 //! of all matrix factors. Coefficients are interleaved by lane.
+
+/// Authenticated sampled matrix transitions; proximity and hiding remain separate.
+pub mod authenticated;
 
 use algebra::{
     Field,
