@@ -7,6 +7,13 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Version 10 now composes every original NAND PBS stage through canonical PCS
+backends. Both masked field pairs pass serialized/decoded encrypted N=32, LWE=21
+complete proofs, and Brakedown controls cover all four NAND inputs over both
+fields. See `canonical-complete-pbs.md`. Fresh complete v10 binding certificates,
+genuine joint aggregation, original-size native profiles, general hiding and
+whole-proof security/performance promotion remain open.
+
 The native final key-switch stage now composes canonical NTTs, original-key
 products, canonical negative-a digits and original output extraction. A fresh
 known-table opening binds the randomized public-input root that the verifier

@@ -21,6 +21,8 @@ use trace::pbs_trace::PBSTrace;
 mod hadamard;
 /// Native key ownership for statically selected canonical PCS backends.
 pub mod canonical_setup;
+/// Version-10 complete composition over statically selected canonical backends.
+pub mod canonical;
 /// Complete ordered PBS batches with joint cross-statement Hadamard authentication.
 pub mod batch;
 

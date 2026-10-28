@@ -36,14 +36,14 @@ The registry does not promise a multi-root transaction or refresh private masks.
 
 ## Integration scope
 
-The existing complete PBS deferred paths now use the common registry through
-their backward-compatible aliases. The masked backend is tested through the same
-registry and source-descriptor implementation. Complete PBS setup, single-opening
-relations, transforms and multi-root Hadamard authentication still have concrete
-Brakedown types. Generalizing those remaining boundaries and producing a versioned
-masked complete-PBS proof remains outstanding. Individual masked packets remain
-independent openings; joint query sharing, native measurements, general hiding
-and whole-proof security are also open.
+The legacy complete deferred paths use the common registry through their
+backward-compatible aliases. Version 10 now composes canonical key ownership,
+polynomial/NTT relations, decomposition, accumulator/monomial links and final key
+switching into an end-to-end proof path. See `canonical-complete-pbs.md` for the
+current small encrypted fixtures and explicit acceptance gaps. Individual masked
+packets still use independent child openings; genuine joint aggregation, native
+security-matched measurements, general hiding and whole-proof security remain
+open.
 
 The masked registry tests use two logical source shapes, one aliased root and one
 unused source. The 1/4/16-claim schedules over both selected fields verify 42
@@ -110,3 +110,9 @@ Final key switching now composes canonical NTT, key-product, decomposition and
 extraction authentication. The randomized public-input root has a separate
 known-table check. See `canonical-packed-key-switch.md`; complete masked PBS
 composition remains open.
+
+Version 10 now provides complete canonical-backend NAND composition. Its small
+masked encrypted fixtures and both Brakedown truth-table controls are described
+in `canonical-complete-pbs.md`. This supersedes earlier component integration
+notes; the original security/performance and fresh complete-binding gates remain
+open.

@@ -147,3 +147,56 @@ pub fn comparison_batch_inventory<F: Field, EF: Field, O>(
         key_switch_reciprocals: proof.key_switch.iter().map(|p| p.helper_roots.len()).sum(),
     }
 }
+
+/// Serialized source/helper root slots in a verified version-10 complete proof.
+/// Internal PCS roots and trusted public-key roots are excluded as above.
+pub fn canonical_inventory<F: Field, EF: Field, O, S, B>(
+    proof: &packed_pbs::canonical::Proof<F, EF, O, S, B>,
+) -> RootInventory {
+    RootInventory {
+        categories: BTreeMap::from([
+            ("coefficients", proof.coefficients.len()),
+            ("evaluations", proof.evaluations.len()),
+            ("decomposition_inputs", proof.decomposition_inputs.len()),
+            ("accumulators", proof.accumulators.len()),
+            (
+                "decomposition_borrows",
+                proof
+                    .decomposition
+                    .iter()
+                    .map(|d| d.borrow_commitments.len())
+                    .sum(),
+            ),
+            (
+                "decomposition_reciprocals",
+                proof
+                    .decomposition
+                    .iter()
+                    .flat_map(|d| &d.comparisons)
+                    .map(|p| p.reciprocal_commitments.len())
+                    .sum(),
+            ),
+            ("monomial_evaluations", proof.monomial.evaluations.len()),
+            (
+                "key_switch_coefficients",
+                proof.key_switch.coefficients.len(),
+            ),
+            ("key_switch_evaluations", proof.key_switch.evaluations.len()),
+            ("key_switch_input", 1),
+            (
+                "key_switch_borrows",
+                proof.key_switch.decomposition.borrow_commitments.len(),
+            ),
+            (
+                "key_switch_reciprocals",
+                proof
+                    .key_switch
+                    .decomposition
+                    .comparisons
+                    .iter()
+                    .map(|p| p.reciprocal_commitments.len())
+                    .sum(),
+            ),
+        ]),
+    }
+}
