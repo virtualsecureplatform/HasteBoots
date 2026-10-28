@@ -61,6 +61,29 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
+    let borrowed: Vec<Vec<_>> = factors
+        .iter()
+        .map(|tables| tables.iter().collect())
+        .collect();
+    let slices: Vec<_> = borrowed.iter().map(Vec::as_slice).collect();
+    prove_borrowed::<F, EF, H, C>(trans, shapes, parameters, &slices, roots, states)
+}
+
+/// Prove using borrowed source tables, preserving the owned API's wire format.
+pub fn prove_borrowed<F, EF, H, C>(
+    trans: &mut Transcript<F>,
+    shapes: &[PackedShape<F>],
+    parameters: &Parameters<C>,
+    factors: &[&[&PackedTable<F>]],
+    roots: &[Vec<Commitment<H::Output>>],
+    states: &[Vec<&State<F, H>>],
+) -> Result<Proof<F, EF, H::Output>, Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    C: RowCode<F> + Serialize,
+{
     bind::<F, EF, H, C>(trans, shapes, parameters, roots)?;
     if factors.len() != shapes.len()
         || states.len() != shapes.len()
@@ -71,7 +94,7 @@ where
     {
         return Err(Error("batch relation factor/state count".into()));
     }
-    let (zero, claims, values) = zero::prove(trans, shapes, factors).map_err(convert)?;
+    let (zero, claims, values) = zero::prove_borrowed(trans, shapes, factors).map_err(convert)?;
     for ((shape, claim), values) in shapes.iter().zip(&claims).zip(&values) {
         claim.check(shape, values).map_err(convert)?;
     }

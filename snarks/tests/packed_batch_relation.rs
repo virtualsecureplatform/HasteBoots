@@ -71,12 +71,37 @@ where
         let proof =
             batch::prove::<F, EF, Sha256, _>(&mut prover, &shapes, &pp, &refs, &roots, &states)
                 .unwrap();
+        let borrowed: Vec<Vec<_>> = factors
+            .iter()
+            .map(|tables| tables.iter().collect())
+            .collect();
+        let borrowed_slices: Vec<_> = borrowed.iter().map(Vec::as_slice).collect();
+        let mut borrowed_trans = Transcript::new_direct();
+        let borrowed_proof = batch::prove_borrowed::<F, EF, Sha256, _>(
+            &mut borrowed_trans,
+            &shapes,
+            &pp,
+            &borrowed_slices,
+            &roots,
+            &states,
+        )
+        .unwrap();
+        assert_eq!(
+            bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap(),
+            bincode::serde::encode_to_vec(&borrowed_proof, bincode::config::standard()).unwrap()
+        );
+        let after_owned = prover.get_challenge(b"borrowed equivalence");
+        assert_eq!(
+            after_owned,
+            borrowed_trans.get_challenge(b"borrowed equivalence")
+        );
         let bytes = bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap();
         let (proof, used): (batch::Proof<F, EF, [u8; 32]>, _) =
             bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
         assert_eq!(used, bytes.len());
         let mut verifier = Transcript::new_direct();
         batch::verify::<F, EF, Sha256, _>(&mut verifier, &shapes, &pp, &roots, &proof).unwrap();
+        assert_eq!(after_owned, verifier.get_challenge(b"borrowed equivalence"));
         assert_eq!(
             prover.get_challenge(b"after batch relation"),
             verifier.get_challenge(b"after batch relation")

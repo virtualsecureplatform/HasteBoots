@@ -1,6 +1,7 @@
 /// Member constraints excluding Hadamard, which the outer proof must discharge.
 /// There is deliberately no public standalone verifier for this member format.
-pub type MemberProof<F, EF, O> = crate::packed_pbs::Proof<F, O, decomp::deferred::Proof<F, EF, O>, ()>;
+pub type MemberProof<F, EF, O> =
+    crate::packed_pbs::Proof<F, O, decomp::deferred::Proof<F, EF, O>, ()>;
 /// One complete certificate for an ordered list of native NAND statements.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Proof<F: algebra::Field, EF: algebra::Field, O> {
@@ -52,14 +53,7 @@ where
         .collect::<Result<Vec<_>, _>>()?;
     trans.append_message(
         DOMAIN,
-        &(
-            OUTER_VERSION,
-            EF::D,
-            setup,
-            contexts,
-            statements,
-            &roots,
-        ),
+        &(OUTER_VERSION, EF::D, setup, contexts, statements, &roots),
     );
     Ok(roots)
 }
@@ -115,19 +109,19 @@ where
         let mut tables = Vec::with_capacity(2 * d + 1);
         let mut references = Vec::with_capacity(2 * d + 1);
         for i in 0..d {
-            tables.push(witness.tables[i].clone());
+            tables.push(&witness.tables[i]);
             references.push(&witness.states[i]);
-            tables.push(key[i].table.clone());
+            tables.push(key[i].table);
             references.push(key[i].state);
         }
-        tables.push(witness.tables[d].clone());
+        tables.push(&witness.tables[d]);
         references.push(&witness.states[d]);
         factors.push(tables);
         states.push(references);
     }
     let shapes = vec![hadamard_shape(pp.source, d); members.len()];
     let tables: Vec<_> = factors.iter().map(Vec::as_slice).collect();
-    let hadamard = relations::prove::<F, EF, H, C>(
+    let hadamard = relations::prove_borrowed::<F, EF, H, C>(
         &mut trans, &shapes, pp.source, &tables, &roots, &states,
     )
     .map_err(convert)?;
