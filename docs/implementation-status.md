@@ -7,9 +7,9 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
-Fresh complete v10 accumulator-linkage certificates now pass strict child and
+Fresh complete v10 linkage, rotation and extraction certificates pass strict child and
 actual-root replay on both backends and selected fields. Four controls are
-accepted and twenty-four endpoint/addition/continuity/digit-view attacks are
+accepted and thirty-six endpoint/addition/continuity/digit-view/rotation/extraction attacks are
 rejected after fresh proof construction. See `canonical-v10-fresh-linkage-audit.md`.
 Other complete attack classes, secure encrypted/original-size audits, joint
 aggregation and security/performance promotion remain open.

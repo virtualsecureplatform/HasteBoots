@@ -14,6 +14,28 @@ enum Attack {
     Chain,
     DigitA,
     DigitB,
+    Rotation,
+    ExtractionA,
+    ExtractionB,
+}
+impl Attack {
+    fn accumulator_valid(self) -> bool {
+        matches!(
+            self,
+            Self::Control | Self::Rotation | Self::ExtractionA | Self::ExtractionB
+        )
+    }
+    fn monomial_valid(self) -> bool {
+        self != Self::Rotation
+    }
+    fn extraction_valid(self) -> bool {
+        !matches!(self, Self::ExtractionA | Self::ExtractionB)
+    }
+}
+struct Report {
+    accumulator: bool,
+    monomial: bool,
+    extraction: bool,
 }
 fn make<F, EF, P>(
     pp: &Parameters<'_, P>,
@@ -86,12 +108,29 @@ where
             inputs[1].fill(F::one());
             co[d].fill(F::one());
         }
-        Attack::Control => {}
+        Attack::Rotation => {
+            let p: u128 = F::MODULUS_VALUE.to_string().parse().unwrap();
+            s.mask[0] = F::from((p / (4 * cfg.n as u128)) as usize);
+        }
+        Attack::Control | Attack::ExtractionA | Attack::ExtractionB => {}
     }
     let final_acc = pp.coefficients.normalize_values(final_acc);
     s.output_b = final_acc[cfg.n] + mono::nand_lut::<F>(cfg.n, cfg.lut_step).unwrap()[0];
+    let actual_output = s.output.clone();
+    let actual_body = s.output_b;
+    if attack == Attack::ExtractionA {
+        s.output[1] += F::one();
+    }
+    if attack == Attack::ExtractionB {
+        s.output_b += F::one();
+    }
     let (plan, requested_initial) = public_inputs(cfg, &s.borrowed()).unwrap();
-    assert!(plan.rotations().iter().all(|&r| r == 0));
+    let actual_plan = mono::Plan::new(cfg.n, vec![0; cfg.lwe]).unwrap();
+    if attack == Attack::Rotation {
+        assert_eq!(plan.rotations()[0], 1);
+    } else {
+        assert!(plan.rotations().iter().all(|&r| r == 0));
+    }
     let mut rng = StdRng::seed_from_u64(seed);
     let tables = |values: Vec<Vec<F>>| {
         values
@@ -200,10 +239,15 @@ where
         &sources,
     )
     .unwrap();
-    assert_eq!(valid, attack == Attack::Control);
-    let monomial = mono::canonical::prove::<F, Sha256, P, _>(
+    assert_eq!(valid, attack.accumulator_valid());
+    let monomial = mono::canonical::audit::prove_foreign::<F, Sha256, P, _>(
         &mut trans,
         &plan,
+        if attack == Attack::Rotation {
+            &actual_plan
+        } else {
+            &plan
+        },
         pp.monomial,
         &[&ac[0], &ac[1]],
         &mut rng,
@@ -219,13 +263,15 @@ where
         .unwrap();
         ks_count + 1
     ];
-    let key_switch = final_stage::prove::<F, EF, Sha256, P, _>(
+    let key_switch = final_stage::audit::prove_foreign::<F, EF, Sha256, P, _>(
         &mut trans,
         &pp.final_stage,
         setup.switching_key(),
         &final_acc,
         &s.output,
         s.output_b,
+        &actual_output,
+        actual_body,
         &zeros,
         &mut rng,
     )
@@ -274,7 +320,7 @@ fn reference_transcript<F, EF, H, P>(
     s: &Statement<'_, F>,
     proof: &Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>,
     trans: &mut Transcript<F>,
-) -> Result<bool, Error>
+) -> Result<Report, Error>
 where
     F: NTTField + Serialize,
     EF: AbstractExtensionField<F> + Serialize,
@@ -388,7 +434,7 @@ where
         &proof.accumulator,
     )
     .map_err(convert)?;
-    mono::canonical::verify::<F, H, P>(
+    let monomial_valid = mono::canonical::audit::verify::<F, H, P>(
         trans,
         &plan,
         pp.monomial,
@@ -402,7 +448,7 @@ where
         &proof.monomial,
     )
     .map_err(convert)?;
-    final_stage::verify::<F, EF, H, P>(
+    let extraction_valid = final_stage::audit::verify::<F, EF, H, P>(
         trans,
         &pp.final_stage,
         &setup.ks,
@@ -412,7 +458,11 @@ where
         &proof.key_switch,
     )
     .map_err(convert)?;
-    Ok(linkage_valid)
+    Ok(Report {
+        accumulator: linkage_valid,
+        monomial: monomial_valid,
+        extraction: extraction_valid,
+    })
 }
 
 fn run<F, EF, P>(
@@ -434,10 +484,12 @@ fn run<F, EF, P>(
     assert_eq!(used, bytes.len());
     let expected = setup.verifier();
     let mut replay = Transcript::new_direct();
-    let linkage_valid =
+    let report =
         reference_transcript::<F, EF, Sha256, P>(pp, &expected, &s.borrowed(), &proof, &mut replay)
             .unwrap();
-    assert_eq!(linkage_valid, attack == Attack::Control);
+    assert_eq!(report.accumulator, attack.accumulator_valid());
+    assert_eq!(report.monomial, attack.monomial_valid());
+    assert_eq!(report.extraction, attack.extraction_valid());
     assert_eq!(
         digest,
         replay.get_challenge(b"v10 fresh complete certificate after")
@@ -447,17 +499,21 @@ fn run<F, EF, P>(
         result.unwrap();
     } else {
         let err = result.unwrap_err();
-        assert!(
-            err.0.contains("packed accumulator linkage"),
-            "{attack:?}: {err}"
-        );
+        let label = match attack {
+            Attack::Rotation => "packed public monomial product",
+            Attack::ExtractionA | Attack::ExtractionB => "packed ZeroCheck terminal identity",
+            _ => "packed accumulator linkage",
+        };
+        assert!(err.0.contains(label), "{attack:?}: {err}");
     }
     println!(
-        "HB_V10_FRESH_LINKAGE_CASE {{\"protocol_version\":10,\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_linkage_valid\":{},\"production_accepted\":{},\"encrypted_profile\":false,\"original_size\":false}}",
+        "HB_V10_FRESH_LINKAGE_CASE {{\"protocol_version\":10,\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_linkage_valid\":{},\"reference_monomial_valid\":{},\"reference_extraction_valid\":{},\"production_accepted\":{},\"encrypted_profile\":false,\"original_size\":false}}",
         F::MODULUS_VALUE,
         backend,
         attack,
-        linkage_valid,
+        report.accumulator,
+        report.monomial,
+        report.extraction,
         attack == Attack::Control
     );
 }
@@ -514,6 +570,9 @@ where
         Attack::Chain,
         Attack::DigitA,
         Attack::DigitB,
+        Attack::Rotation,
+        Attack::ExtractionA,
+        Attack::ExtractionB,
     ] {
         run::<F, EF, _>(&pp, &setup, attack, "brakedown");
     }
@@ -714,4 +773,47 @@ masked_case!(
     algebra::GoldilocksExtension3,
     4,
     DigitB
+);
+
+masked_case!(
+    masked_babybear_rotation,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    Rotation
+);
+masked_case!(
+    masked_babybear_extraction_a,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    ExtractionA
+);
+masked_case!(
+    masked_babybear_extraction_b,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    ExtractionB
+);
+masked_case!(
+    masked_goldilocks_rotation,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    Rotation
+);
+masked_case!(
+    masked_goldilocks_extraction_a,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    ExtractionA
+);
+masked_case!(
+    masked_goldilocks_extraction_b,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    ExtractionB
 );
