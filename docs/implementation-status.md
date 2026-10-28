@@ -7,6 +7,17 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Complete opt-in version 8 now uses shared-query comparisons in both
+blind-rotation decompositions and final key switching, while retaining all
+other PBS constraints and the original output key. Twenty-five targeted Rust
+tests and 88 Python checks pass, including 42 fresh decoded v8 test certificates
+and twenty reconstructed malicious/control certificates. Frozen toy runs verify
+84 certificates: all 42 v5 wire controls remain exact, and 42 v8 proofs match
+archived statements, keys, FHE parameters and layouts. Aggregate toy bytes fall
+1.56%/2.31% versus v5. Original-size validation is queued. This is within-proof
+sharing, not yet cross-statement comparison aggregation or whole-security/
+performance promotion. See `packed-shared-pbs.md`.
+
 The shared-query extension lookup frontend is implemented as
 `packed_extension_lookup::shared`: each reciprocal sum and identity is checked
 separately at a common scalar point, then two canonical multi-root packets
@@ -14,8 +25,9 @@ authenticate all source/helper claims. All 21 targeted lookup tests and the VFHE
 check pass, including decoded 1/4/16 fixtures and six fresh foreign-source
 certificates (two controls accepted, four attacks rejected). Toy sixteen-request
 packets shrink from 457,932 to 312,223 bytes for BabyBear and from 219,441 to
-187,226 bytes for Goldilocks versus the deferred frontend. Complete PBS integration,
-bounded native groups, performance/security budgets and promotion remain open.
+187,226 bytes for Goldilocks versus the deferred frontend. Version 8 now composes
+it within a complete single-PBS proof; cross-statement composition, bounded native
+groups, complete security budgets and promotion remain open.
 See `shared-extension-lookups.md`.
 
 Shared scalar sumcheck batching is implemented as `sumcheck::batch`, with
@@ -23,7 +35,8 @@ individually checked equations, mixed degrees and a common terminal point over
 full extension-field challenges. Twelve decoded fixtures cover 84 equations;
 all eleven selected sumcheck tests and 86 Python checks pass. This is a prerequisite
 for jointly scheduling reciprocal sums and constraints; the new lookup frontend
-uses it, while complete PBS integration remains unfinished. See `shared-scalar-sumcheck.md`.
+uses it, and version 8 composes it within individual PBS proofs. Cross-statement
+comparison sharing remains unfinished. See `shared-scalar-sumcheck.md`.
 
 Shared-challenge ZeroCheck now pools folded buffers by immutable source-object
 identity. A shared public-key factor folds once per round, while every relation

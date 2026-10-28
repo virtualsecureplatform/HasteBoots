@@ -5,7 +5,8 @@ against an ordered registry of original source roots. All sources must have the
 same complete PCS parameter context. Requests can select different source slots,
 public tables, repetition counts and logical prefixes. Helper geometry must match
 the common scalar domain. This opt-in, non-hiding component does not change any
-complete PBS protocol.
+existing complete PBS format. Opt-in complete version 8 now composes it within
+each decomposition; see `packed-shared-pbs.md`.
 
 Every source context, root and trusted request is bound before grouped
 multiplicities and extension compression challenges. All reciprocal helper roots
@@ -26,9 +27,10 @@ its lane-selector order and partial-domain mask.
 The prover releases row indices after helper construction, coefficient buffers
 after commitments, and the original scalar polynomial buffers after sumcheck.
 It retains the commitment states until authentication finishes. Peak memory still
-grows with helper count; native complete-PBS integration needs bounded grouping
-and retained canonical comparison witnesses. Those steps, native component
-measurements, complete security analysis and promotion remain unfinished.
+grows with helper count. Version 8 integrates individual decompositions; future
+cross-statement composition needs bounded grouping and retained canonical
+comparison witnesses. Those steps, native measurements, complete security analysis
+and promotion remain unfinished.
 
 ## Validation
 

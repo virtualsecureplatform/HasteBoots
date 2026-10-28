@@ -36,8 +36,9 @@ helper value; independent unauthenticated values would not suffice.
 
 The lookup frontend is now implemented separately in
 `packed_extension_lookup::shared`; see `shared-extension-lookups.md`. Retained
-comparison witnesses, memory-bounded grouping and complete PBS integration
-remain required plan items. No complete proof size or speed claim follows from these
+comparison witnesses and memory-bounded grouping for cross-statement composition
+remain required plan items. Complete version 8 now uses it within individual PBS
+proofs; see `packed-shared-pbs.md`. No complete proof size or speed claim follows from these
 unit tests.
 
 ## Evidence
