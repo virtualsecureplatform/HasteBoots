@@ -130,9 +130,15 @@ are `de29020b81995c859fd606f236f81b25c931eb5919565a886b5074afed5affd3`
 (BabyBear) and `fbff8921f8f0cf5a1f033e065083d86351d711b165db9eecba187e9235581b23`
 (Goldilocks). No builds or tests ran during timing.
 
-Original-size fresh 1/4/16 validation is running separately under
+Original-size fresh 1/4/16 validation is complete under
 `target/performance/deferred-pbs-native-fresh/`, reusing these exact executables.
-It checks 21 fresh statements per field and all NAND pairs against archived
-native fixtures. Its two concurrent processes are correctness-only; completion
-and the complete validation evidence remain pending. Cross-statement
-aggregation, hiding, independent whole-security review and promotion are open.
+All 42 fresh statements (21 per field) and all NAND pairs verify against archived
+native statements/keys/parameters/layouts. Both processes exit successfully;
+all 42 root-inventory records are digest-linked and retain counts 75/131.
+The combined conditional interactive inventory is 129.32427 bits. The two
+concurrent runs are correctness-only, with no performance claims. Their manifest
+links the immutable build snapshot and exact executables above; subsequent
+shared-challenge relation development does not change those frozen artifacts.
+Cross-statement PBS aggregation, hiding, independent whole-security review and
+promotion remain open. The relation batching component is described separately
+in `packed-batch-relations.md`.
