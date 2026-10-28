@@ -7,11 +7,19 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Fresh complete version-11 binding audits now cover both backends and selected
+fields with sixty certificates: four accepted controls and fifty-six rejected
+attacks. Reference replay authenticates every actual-root opening and reports
+key products, canonicity, linkage, rotations and extraction separately. See
+`canonical-v11-fresh-binding-audit.md`. Secure encrypted/original-size adversarial
+audits, false-lookup composition cases, independent review and the original
+security/performance gates remain open.
+
 Complete canonical PBS version 11 now composes shared comparisons in both
 blind-rotation halves and final key switching, with its own trusted entry point
 and parent domain. Version 10 retains its proof spelling and frozen complete
-wire bytes. See `canonical-shared-complete-pbs.md`. Fresh complete version-11
-adversarial audits, native resource/performance validation, genuine joint
+wire bytes. See `canonical-shared-complete-pbs.md`. Further version-11
+adversarial classes, native resource/performance validation, genuine joint
 aggregation and the original security/promotion gates remain open.
 
 Canonical final key switching now has an explicit shared-comparison entry point,

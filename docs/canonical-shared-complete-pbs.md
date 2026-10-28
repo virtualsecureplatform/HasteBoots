@@ -53,8 +53,9 @@ Tests reject version relabeling, missing source/stage roots, changed endpoints,
 missing NTT/decomposition children, changed products or shared helper terminals,
 changed known-input roots, changed monomial children, changed extraction and
 wrong public input/output ciphertext components. These are compatibility and
-tamper controls. Fresh complete malicious-trace certificates under version 11
-remain necessary; version-10 audits and component forgeries do not replace them.
+tamper controls. Fresh complete version-11 binding certificates now provide
+separate evidence; see `canonical-v11-fresh-binding-audit.md`. Other adversarial
+classes, secure encrypted/original-size cases and independent review remain open.
 
 The fixtures use ring dimension 32, LWE dimension 21 and one proximity query for
 completeness. They are not original-size or 128-bit profiles. Public linear,
@@ -89,4 +90,4 @@ tests, two version-10 truth-table tests, two frozen complete wire tests, two
 version-11 truth-table tests and two masked complete comparison tests: 95 unique
 tests. The existing version-10 masked integration target also builds, and the
 locked workspace check passes. The 30 expensive version-10 algebraic audits
-remain opt-in; fresh complete version-11 malicious-trace audits remain open.
+remain opt-in. A later fresh version-11 binding audit is documented separately.

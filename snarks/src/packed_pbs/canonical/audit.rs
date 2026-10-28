@@ -1,7 +1,9 @@
 //! Fresh complete algebraic certificates, including every actual-root opening.
 //! Zero evaluation keys isolate linkage; these are not encrypted native profiles.
 use super::*;
+mod mode;
 use algebra::Basis;
+use mode::AuditStages;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::de::DeserializeOwned;
 use sha2::Sha256;
@@ -54,20 +56,21 @@ struct Report {
     monomial: bool,
     extraction: bool,
 }
-fn make<F, EF, P>(
+fn make<F, EF, P, D>(
     pp: &Parameters<'_, P>,
     setup: &canonical_setup::ProverSetup<F, Sha256, P>,
     attack: Attack,
     seed: u64,
 ) -> (
     StatementData<F>,
-    Proof<F, EF, [u8; 32], P::SingleProof, P::BatchProof>,
+    BackendProof<F, [u8; 32], P::SingleProof, P::BatchProof, D::Decomposition, D::KeySwitch>,
     F,
 )
 where
     F: NTTField + Serialize,
     EF: AbstractExtensionField<F> + Serialize,
     P: CanonicalPcs<F, Sha256>,
+    D: AuditStages<F, EF, Sha256, P>,
 {
     let expected = setup.verifier();
     let cfg = &expected.config;
@@ -240,7 +243,7 @@ where
         commit::<F, Sha256, P, _>(pp.inputs, &tables(inputs), &mut rng).unwrap();
     let normalized = statement::<F, Sha256, P>(pp.coefficients, &s.borrowed());
     let mut trans = Transcript::new_direct();
-    bind::<F, EF, Sha256, P>(
+    bind_inner::<F, EF, Sha256, P, D>(
         &mut trans,
         pp,
         &expected,
@@ -308,7 +311,7 @@ where
         .collect();
     let decomposition = (0..2)
         .map(|h| {
-            decomp::canonical::audit::prove::<F, EF, Sha256, P, _>(
+            D::audit_decompose(
                 &mut trans,
                 &cfg.decomposition::<F>().unwrap(),
                 &input[h],
@@ -371,7 +374,7 @@ where
         }
         assert_eq!(integer, 0);
     }
-    let key_switch = final_stage::audit::prove_foreign::<F, EF, Sha256, P, _>(
+    let key_switch = D::audit_key_switch(
         &mut trans,
         &pp.final_stage,
         setup.switching_key(),
@@ -385,8 +388,8 @@ where
         &mut rng,
     )
     .unwrap();
-    let proof = Proof {
-        protocol_version: 10,
+    let proof = BackendProof {
+        protocol_version: D::VERSION,
         coefficients: co_roots,
         evaluations: ev_roots,
         decomposition_inputs: in_roots,
@@ -399,7 +402,7 @@ where
         monomial,
         key_switch,
     };
-    let digest = trans.get_challenge(b"v10 fresh complete certificate after");
+    let digest = trans.get_challenge(b"fresh complete canonical certificate after");
     assert_eq!(rows, 32);
     (s, proof, digest)
 }
@@ -423,11 +426,18 @@ impl<F: Field> StatementData<F> {
     }
 }
 
-fn reference_transcript<F, EF, H, P>(
+fn reference_transcript<F, EF, H, P, D>(
     pp: &Parameters<'_, P>,
     setup: &VerifierSetup<H::Output>,
     s: &Statement<'_, F>,
-    proof: &Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>,
+    proof: &BackendProof<
+        F,
+        H::Output,
+        P::SingleProof,
+        P::BatchProof,
+        D::Decomposition,
+        D::KeySwitch,
+    >,
     trans: &mut Transcript<F>,
 ) -> Result<Report, Error>
 where
@@ -435,8 +445,9 @@ where
     EF: AbstractExtensionField<F> + Serialize,
     H: Hash + Send + Sync,
     P: CanonicalPcs<F, H>,
+    D: AuditStages<F, EF, H, P>,
 {
-    if proof.protocol_version != PROTOCOL_VERSION {
+    if proof.protocol_version != D::VERSION {
         return Err(error("unsupported canonical complete PBS protocol version"));
     }
     validate::<F, EF, H, P>(pp, setup)?;
@@ -453,7 +464,7 @@ where
     let s = normalized.borrowed();
     let (plan, initial) = public_inputs(cfg, &s)?;
 
-    bind::<F, EF, H, P>(
+    bind_inner::<F, EF, H, P, D>(
         trans,
         pp,
         setup,
@@ -494,7 +505,7 @@ where
     }
     let mut decomposition_valid = [[true; 3]; 2];
     for half in 0..2 {
-        decomposition_valid[half] = decomp::canonical::audit::verify::<F, EF, H, P>(
+        decomposition_valid[half] = D::audit_verify_decomposition(
             trans,
             &cfg.decomposition::<F>()?,
             &input[half],
@@ -508,8 +519,7 @@ where
                 })
                 .collect::<Vec<_>>(),
             &proof.decomposition[half],
-        )
-        .map_err(convert)?;
+        )?;
     }
     let ac: Vec<_> = proof
         .accumulators
@@ -559,7 +569,7 @@ where
     )
     .map_err(convert)?;
     let (switch_key_product_valid, extraction_valid, switch_decomposition_valid) =
-        final_stage::audit::verify::<F, EF, H, P>(
+        D::audit_verify_key_switch(
             trans,
             &pp.final_stage,
             &setup.ks,
@@ -567,8 +577,7 @@ where
             s.output_a,
             s.output_b,
             &proof.key_switch,
-        )
-        .map_err(convert)?;
+        )?;
     Ok(Report {
         decomposition: decomposition_valid,
         switch_decomposition: switch_decomposition_valid,
@@ -580,7 +589,7 @@ where
     })
 }
 
-fn run<F, EF, P>(
+fn run<F, EF, P, D>(
     pp: &Parameters<'_, P>,
     setup: &canonical_setup::ProverSetup<F, Sha256, P>,
     attack: Attack,
@@ -589,19 +598,29 @@ fn run<F, EF, P>(
     F: NTTField + Serialize + DeserializeOwned,
     EF: AbstractExtensionField<F> + Serialize + DeserializeOwned,
     P: CanonicalPcs<F, Sha256>,
+    D: AuditStages<F, EF, Sha256, P>,
     P::SingleProof: serde::de::DeserializeOwned,
     P::BatchProof: serde::de::DeserializeOwned,
+    D::Decomposition: Serialize + DeserializeOwned,
+    D::KeySwitch: Serialize + DeserializeOwned,
 {
-    let (s, proof, digest) = make::<F, EF, P>(pp, setup, attack, 1700 + attack as u64);
+    let (s, proof, digest) = make::<F, EF, P, D>(pp, setup, attack, 1700 + attack as u64);
     let bytes = bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap();
-    let (proof, used): (Proof<F, EF, [u8; 32], P::SingleProof, P::BatchProof>, usize) =
-        bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
+    let (proof, used): (
+        BackendProof<F, [u8; 32], P::SingleProof, P::BatchProof, D::Decomposition, D::KeySwitch>,
+        usize,
+    ) = bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
     assert_eq!(used, bytes.len());
     let expected = setup.verifier();
     let mut replay = Transcript::new_direct();
-    let report =
-        reference_transcript::<F, EF, Sha256, P>(pp, &expected, &s.borrowed(), &proof, &mut replay)
-            .unwrap();
+    let report = reference_transcript::<F, EF, Sha256, P, D>(
+        pp,
+        &expected,
+        &s.borrowed(),
+        &proof,
+        &mut replay,
+    )
+    .unwrap();
     assert_eq!(
         report.decomposition[0],
         [true, true, attack != Attack::CanonicalA]
@@ -624,9 +643,9 @@ fn run<F, EF, P>(
     assert_eq!(report.extraction, attack.extraction_valid());
     assert_eq!(
         digest,
-        replay.get_challenge(b"v10 fresh complete certificate after")
+        replay.get_challenge(b"fresh complete canonical certificate after")
     );
-    let result = verify::<F, EF, Sha256, P>(pp, &expected, &s.borrowed(), &proof);
+    let result = verify_inner::<F, EF, Sha256, P, D>(pp, &expected, &s.borrowed(), &proof);
     if attack == Attack::Control {
         result.unwrap();
     } else {
@@ -643,7 +662,13 @@ fn run<F, EF, P>(
         assert!(err.0.contains(label), "{attack:?}: {err}");
     }
     println!(
-        "HB_V10_FRESH_LINKAGE_CASE {{\"protocol_version\":10,\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_decomposition_valid\":{:?},\"reference_switch_decomposition_valid\":{:?},\"reference_key_product_valid\":{},\"reference_switch_key_product_valid\":{},\"reference_linkage_valid\":{},\"reference_monomial_valid\":{},\"reference_extraction_valid\":{},\"production_accepted\":{},\"encrypted_profile\":false,\"original_size\":false}}",
+        "{} {{\"protocol_version\":{},\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_decomposition_valid\":{:?},\"reference_switch_decomposition_valid\":{:?},\"reference_key_product_valid\":{},\"reference_switch_key_product_valid\":{},\"reference_linkage_valid\":{},\"reference_monomial_valid\":{},\"reference_extraction_valid\":{},\"production_accepted\":{},\"encrypted_profile\":false,\"original_size\":false}}",
+        if D::VERSION == 10 {
+            "HB_V10_FRESH_LINKAGE_CASE"
+        } else {
+            "HB_V11_FRESH_BINDING_CASE"
+        },
+        D::VERSION,
         F::MODULUS_VALUE,
         backend,
         attack,
@@ -657,10 +682,18 @@ fn run<F, EF, P>(
         attack == Attack::Control
     );
 }
-fn ordinary<F, EF>(width: usize)
+fn ordinary<F, EF, D>(width: usize)
 where
     F: NTTField + Serialize + DeserializeOwned,
     EF: AbstractExtensionField<F> + Serialize + DeserializeOwned,
+    D: AuditStages<
+            F,
+            EF,
+            Sha256,
+            pcs::matrix_weighted::Parameters<pcs::utils::code::BlockReedSolomonCode<F>>,
+        >,
+    D::Decomposition: Serialize + DeserializeOwned,
+    D::KeySwitch: Serialize + DeserializeOwned,
 {
     use pcs::{matrix_weighted::Parameters as Pp, utils::code::BlockReedSolomonCode};
     let cfg = Config::new::<F>(32, 21, 8, 5, 1, 1).unwrap();
@@ -717,7 +750,7 @@ where
         Attack::CanonicalB,
         Attack::SwitchCanonical,
     ] {
-        run::<F, EF, _>(&pp, &setup, attack, "brakedown");
+        run::<F, EF, _, D>(&pp, &setup, attack, "brakedown");
     }
     let mut br = br;
     let mut weight = F::one();
@@ -738,7 +771,7 @@ where
         &mut StdRng::seed_from_u64(1601),
     )
     .unwrap();
-    run::<F, EF, _>(&pp, &setup, Attack::KeyProduct, "brakedown");
+    run::<F, EF, _, D>(&pp, &setup, Attack::KeyProduct, "brakedown");
     let mut weight = F::one();
     for limb in br[0].c_m_mut().iter_mut() {
         limb.b_mut_slice().fill(F::zero());
@@ -764,21 +797,24 @@ where
         &mut StdRng::seed_from_u64(1602),
     )
     .unwrap();
-    run::<F, EF, _>(&pp, &setup, Attack::SwitchKeyProduct, "brakedown");
+    run::<F, EF, _, D>(&pp, &setup, Attack::SwitchKeyProduct, "brakedown");
 }
 #[test]
 fn ordinary_babybear_complete_linkage() {
-    ordinary::<algebra::BabyBear, algebra::BabyBearExtension6>(8);
+    ordinary::<algebra::BabyBear, algebra::BabyBearExtension6, stages::PerLimb>(8);
 }
 #[test]
 fn ordinary_goldilocks_complete_linkage() {
-    ordinary::<algebra::Goldilocks, algebra::GoldilocksExtension3>(4);
+    ordinary::<algebra::Goldilocks, algebra::GoldilocksExtension3, stages::PerLimb>(4);
 }
 
-fn masked<F, EF>(width: usize, attack: Attack)
+fn masked<F, EF, D>(width: usize, attack: Attack)
 where
     F: NTTField + Serialize + DeserializeOwned,
     EF: AbstractExtensionField<F> + Serialize + DeserializeOwned,
+    D: AuditStages<F, EF, Sha256, pcs::matrix_weighted::masked_polyfrim::Parameters<F, EF>>,
+    D::Decomposition: Serialize + DeserializeOwned,
+    D::KeySwitch: Serialize + DeserializeOwned,
 {
     use pcs::matrix_weighted::masked_polyfrim::Parameters as Pp;
     let cfg = Config::new::<F>(32, 21, 8, 5, 1, 1).unwrap();
@@ -859,7 +895,7 @@ where
         &mut StdRng::seed_from_u64(2100 + attack as u64),
     )
     .unwrap();
-    run::<F, EF, _>(&pp, &setup, attack, "masked");
+    run::<F, EF, _, D>(&pp, &setup, attack, "masked");
     assert!(
         setup
             .br_oracles(&key)
@@ -877,10 +913,13 @@ where
 }
 macro_rules! masked_case {
     ($name:ident,$f:ty,$e:ty,$width:expr,$attack:ident) => {
+        masked_case!($name, $f, $e, $width, $attack, stages::PerLimb);
+    };
+    ($name:ident,$f:ty,$e:ty,$width:expr,$attack:ident,$mode:ty) => {
         #[test]
         #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
         fn $name() {
-            masked::<$f, $e>($width, Attack::$attack);
+            masked::<$f, $e, $mode>($width, Attack::$attack);
         }
     };
 }
@@ -1097,4 +1136,257 @@ masked_case!(
     algebra::GoldilocksExtension3,
     4,
     SwitchCanonical
+);
+
+#[test]
+fn v11_ordinary_babybear_complete_binding() {
+    ordinary::<algebra::BabyBear, algebra::BabyBearExtension6, stages::Shared>(8);
+}
+#[test]
+fn v11_ordinary_goldilocks_complete_binding() {
+    ordinary::<algebra::Goldilocks, algebra::GoldilocksExtension3, stages::Shared>(4);
+}
+masked_case!(
+    v11_masked_babybear_control,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    Control,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_babybear_initial,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    Initial,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_babybear_final,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    Final,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_babybear_addition,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    Addition,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_babybear_chain,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    Chain,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_babybear_digit_a,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    DigitA,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_babybear_digit_b,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    DigitB,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_control,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    Control,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_initial,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    Initial,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_final,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    Final,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_addition,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    Addition,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_chain,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    Chain,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_digit_a,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    DigitA,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_digit_b,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    DigitB,
+    stages::Shared
+);
+
+masked_case!(
+    v11_masked_babybear_rotation,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    Rotation,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_babybear_extraction_a,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    ExtractionA,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_babybear_extraction_b,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    ExtractionB,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_rotation,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    Rotation,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_extraction_a,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    ExtractionA,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_extraction_b,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    ExtractionB,
+    stages::Shared
+);
+
+masked_case!(
+    v11_masked_babybear_key_product,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    KeyProduct,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_key_product,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    KeyProduct,
+    stages::Shared
+);
+
+masked_case!(
+    v11_masked_babybear_switch_key_product,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    SwitchKeyProduct,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_switch_key_product,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    SwitchKeyProduct,
+    stages::Shared
+);
+
+masked_case!(
+    v11_masked_babybear_canonical_a,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    CanonicalA,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_babybear_canonical_b,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    CanonicalB,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_babybear_switch_canonical,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    SwitchCanonical,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_canonical_a,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    CanonicalA,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_canonical_b,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    CanonicalB,
+    stages::Shared
+);
+masked_case!(
+    v11_masked_goldilocks_switch_canonical,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    SwitchCanonical,
+    stages::Shared
 );

@@ -28,6 +28,26 @@ where
         digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
         proof: &Self::Proof,
     ) -> Result<(), Error>;
+    #[cfg(test)]
+    fn audit_prove<R: Rng + CryptoRng>(
+        trans: &mut Transcript<F>,
+        cfg: &Radix,
+        source: &CanonicalProverOracle<'_, F, H, P>,
+        borrow: &P,
+        helper: &P,
+        digits: &[&CanonicalProverOracle<'_, F, H, P>],
+        rng: &mut R,
+    ) -> Result<Self::Proof, Error>;
+    #[cfg(test)]
+    fn audit_verify(
+        trans: &mut Transcript<F>,
+        cfg: &Radix,
+        source: &CanonicalVerifierOracle<'_, H::Output, P>,
+        borrow: &P,
+        helper: &P,
+        digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
+        proof: &Self::Proof,
+    ) -> Result<[bool; 3], Error>;
 }
 macro_rules! backend {
     ($name:ident,$module:ident,$domain:expr) => {
@@ -69,6 +89,36 @@ macro_rules! backend {
             ) -> Result<(), Error> {
                 $module::verify::<F, EF, H, P>(trans, cfg, source, borrow, helper, digits, proof)
                     .map_err(convert)
+            }
+            #[cfg(test)]
+            fn audit_prove<R: Rng + CryptoRng>(
+                trans: &mut Transcript<F>,
+                cfg: &Radix,
+                source: &CanonicalProverOracle<'_, F, H, P>,
+                borrow: &P,
+                helper: &P,
+                digits: &[&CanonicalProverOracle<'_, F, H, P>],
+                rng: &mut R,
+            ) -> Result<Self::Proof, Error> {
+                $module::audit::prove::<F, EF, H, P, R>(
+                    trans, cfg, source, borrow, helper, digits, rng,
+                )
+                .map_err(convert)
+            }
+            #[cfg(test)]
+            fn audit_verify(
+                trans: &mut Transcript<F>,
+                cfg: &Radix,
+                source: &CanonicalVerifierOracle<'_, H::Output, P>,
+                borrow: &P,
+                helper: &P,
+                digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
+                proof: &Self::Proof,
+            ) -> Result<[bool; 3], Error> {
+                $module::audit::verify::<F, EF, H, P>(
+                    trans, cfg, source, borrow, helper, digits, proof,
+                )
+                .map_err(convert)
             }
         }
     };

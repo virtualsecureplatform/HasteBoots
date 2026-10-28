@@ -177,26 +177,6 @@ where
     .map(|p| p.context().map_err(convert))
     .collect()
 }
-#[cfg(test)]
-fn bind<F, EF, H, P>(
-    trans: &mut Transcript<F>,
-    pp: &Parameters<'_, P>,
-    setup: &VerifierSetup<H::Output>,
-    s: &PublicStatement<F>,
-    co: &[Commitment<H::Output>],
-    ev: &[Commitment<H::Output>],
-    inputs: &[Commitment<H::Output>],
-    acc: &[Commitment<H::Output>],
-    final_acc: &[F],
-) -> Result<(), Error>
-where
-    F: NTTField + Serialize,
-    EF: AbstractExtensionField<F>,
-    H: Hash + Send + Sync,
-    P: CanonicalPcs<F, H>,
-{
-    bind_inner::<F, EF, H, P, stages::PerLimb>(trans, pp, setup, s, co, ev, inputs, acc, final_acc)
-}
 fn bind_inner<F, EF, H, P, M>(
     trans: &mut Transcript<F>,
     pp: &Parameters<'_, P>,

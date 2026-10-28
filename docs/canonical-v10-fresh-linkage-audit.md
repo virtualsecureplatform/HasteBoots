@@ -94,3 +94,7 @@ masked audit tests, for 92 unique test cases. The locked workspace check passes.
 The validated source snapshot, checked certificate records and logs are under
 `target/performance/v10-fresh-canonicity-audit/`. The earlier accumulator-only run
 remains archived under `target/performance/v10-fresh-linkage-audit/`.
+
+The shared driver now also constructs version-11 certificates with strict shared
+comparison replay; see `canonical-v11-fresh-binding-audit.md`. Earlier version-10
+archives remain immutable; the current default run retains its ordinary cases.
