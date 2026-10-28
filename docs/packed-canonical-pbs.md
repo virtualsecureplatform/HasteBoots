@@ -72,7 +72,17 @@ parameters and four PCS layouts match the archived standalone fixtures. These
 are toy size/correctness results, not native latency evidence.
 
 Frozen source and binaries, commands, logs and comparison scripts are under
-`target/performance/canonical-pbs/`. Original-size native correctness is running serially under
-`target/performance/canonical-pbs-native/`. Native comparative timing and comparative memory remain
-separate validation gates. This change does not establish the full-plan promotion
+`target/performance/canonical-pbs/`. Original-size native correctness completes
+all six 1/4/16 certificates covering
+42 fresh statements under `target/performance/canonical-pbs-native/`. Every
+statement, native key, FHE parameter set and PCS layout matches its archived
+fixture. The conditional 42-member interactive inventory is 129.32427 bits,
+excluding whole-proof Fiat–Shamir/hash/composition security. At sixteen members,
+v7 bytes are 3.30% lower for BabyBear and 4.38% lower for Goldilocks than v6;
+one-member packets are slightly larger. These correctness sessions overlapped
+compilation and establish no comparative timing result. The earlier derived JSON
+scope label for canonical batches was incorrect; revalidated `*.checked.json`
+files and `summary.json` use the corrected label without changing the raw logs.
+Native comparative timing and comparative memory remain separate validation
+gates. This change does not establish the full-plan promotion
 criteria.

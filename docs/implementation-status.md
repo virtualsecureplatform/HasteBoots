@@ -7,6 +7,13 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Shared scalar sumcheck batching is implemented as `sumcheck::batch`, with
+individually checked equations, mixed degrees and a common terminal point over
+full extension-field challenges. Twelve decoded fixtures cover 84 equations;
+all eleven selected sumcheck tests and 86 Python checks pass. This is a prerequisite
+for jointly scheduling reciprocal sums and constraints, not yet a lookup frontend
+or a complete PBS version. See `shared-scalar-sumcheck.md`.
+
 Shared-challenge ZeroCheck now pools folded buffers by immutable source-object
 identity. A shared public-key factor folds once per round, while every relation
 keeps its own equality factor, messages and equation checks. No alias routing is
@@ -27,23 +34,27 @@ and transcript equivalence and forty reconstructed complete v6/v7 certificates.
 Twelve frozen-binary complete wire controls (84 fresh member instances) match
 all earlier v6/v7 proof bytes and hashes exactly. See `packed-borrowed-batches.md`.
 The original-size frozen v7 owning build has
-completed all three BabyBear certificates covering 21 fresh statements; Goldilocks
-is still running. These native results do not validate the new borrowed build.
+completed all six certificates covering 42 fresh statements across both fields,
+with all archived fixtures matched. Borrowed-build native validation is now running,
+and shared-fold native validation is queued behind it. These frozen owning-build
+results do not validate the newer implementations.
 
 Opt-in complete outer version 7 now deduplicates repeated canonical Hadamard
 roots under a common query. Every member retains version 6 constraints and every
 relation equation is checked independently; conflicting aliases reject before
 random aggregation. Complete 1/4/16 decoded public tests pass for both fields,
 as do canonical relation/PCS tests and all 86 Python checks. The implementation
-shares protocol bodies while retaining old domains and formats. Native validation,
-comparative measurements remain open. Fresh v7 reconstructed-child audits
+shares protocol bodies while retaining old domains and formats. All six native
+certificates now pass; comparative performance measurements remain open. Fresh v7 reconstructed-child audits
 pass twenty certificates (two controls accepted, eighteen attacks rejected),
 including malicious members first and last beside an honest alternate anchor.
 The full release audit across versions 2–7 passes all 150 certificates in fifteen
-tests, with fifteen controls accepted and 135 attacks rejected. Two-order toy runs verify 24 packets covering 168 member instances; all
+tests, with fifteen controls accepted and 135 attacks rejected. Two-order toy
+runs verify 24 packets covering 168 member instances; all
 twelve v6 wire controls match archived bytes. At sixteen members, toy bytes fall
-3.28%/6.76% with repeated hashes exact. Original-size native correctness is running
-serially. See `packed-canonical-pbs.md`.
+3.28%/6.76% with repeated hashes exact. Original-size native correctness covers
+42 fresh statements; sixteen-member native bytes fall 3.30%/4.38% versus v6.
+See `packed-canonical-pbs.md`.
 
 Complete experimental version 6 now composes ordered NAND PBS batches with one
 cross-statement Hadamard certificate. The private member backend omits only that
@@ -262,7 +273,7 @@ Fiat-Shamir/security certificate; complete security and promotion remain open.
 | Packed PipFRI research gate | Open; conditional scalar-opening bridge reference implemented | `snarks::packed_scalar_opening` preserves ordered matrix products in a public multilinear kernel and reduces a whole query batch to one degree-two sumcheck and one original masked scalar opening. The conditional interactive bound is epsilon_PCS+(1+2v)/abs(E), assuming a fixed committed scalar polynomial and adaptive evaluation soundness; a base-coordinate projection lemma gives canonical base responses without asserting extension-coefficient membership. Ten bridge tests include noncommuting/independent product references, serde/public verification, 1/4/16-query one-allowance batching, fresh false-witness/genuine-source terminal rejection, an accepted non-base source projection and explicit witness recovery showing the bridge is non-hiding. A reproduced Goldilocks encoding bug is fixed by returning the exact PCS-bound value. All 81 targeted PCS/SNARK tests and the workspace check pass. This is an added sumcheck reduction, not direct packed PolyFRIM or a hiding MW-PCS. Two reversed-order capacity comparisons now verify all 24 large/12 toy proofs on identical tables and dense queries; the bridge is about 62x slower at 16 queries, despite using only 13–17% of Brakedown bytes. Keep it out of full PBS and retain MW-Brakedown. Actual FHE integration, concrete PCS/FS soundness and the direct packed consistency/proximity/hiding gate remain open. See `packed-scalar-opening.md` |
 | MW-Basefold comparison | Streaming reference implemented and native comparison measured; security-matched analysis open | `pcs::mw_basefold` follows the paper’s round-interleaved fold schedule with base-field coordinate arithmetic, whole-symbol authentication and exact terminal decoding. `sumcheck::packed` / `packed_zero` now expose per-challenge callbacks; empty callbacks preserve existing framing. `snarks::packed_basefold` supplies fresh structured challenges and authenticates canonical source terminals. Independent Horner/re-encoding/noncommuting references, genuine-path invalid-degree attacks and fresh false-source certificates pass over both fields. Two alternating native Hadamard pairs verify all 16 proofs. Reused Basefold is slower: BabyBear 1.303/1.192 s vs Brakedown 0.590/0.514 s, Goldilocks 2.215/2.282 s vs 1.251/1.269 s; bytes are 2.18x / 1.63x. Keep Brakedown on the current path. This uses common experimental query counts, not security-matched parameters; 64 Rust and 34 Python tests pass. See `performance-results.md`. The after-query Brakedown API/default PBS are unchanged; security-matched analysis and any GF-query adaptation remain open |
 | Convolution check | Profiled gate; deferred | After terminal reuse, complete warm proving is about 40.78 s, of which decomposition is 36.57 s (90%). Private NTT links are 0.76 s; monomial proving is 0.45 s. Prioritize lookup cost, then reassess whether a negacyclic quotient experiment is warranted |
-| Full validation at batches 1/4/16 | Original-size independent validation through v5 and joint-Hadamard v6 validation complete; further batch sharing incomplete | Original ring-1024/LWE-728 dimensions and original output keys are preserved. Selected BabyBear degree 6/shifted-helper and Goldilocks degree 3/width 4 profiles pass all 42 original-size fresh v4 cases, with archived native statements/keys/parameters/layouts matched; their conditional 21-proof interactive inventories are 130.51/130.16 bits. Version 5 passes all 42 fresh toy cases and sixteen native repeated-statement comparison certificates (including v4 controls); all 42 fresh original-size v5 cases also pass with exact archived fixture matches in correctness-only processes under `target/performance/deferred-pbs-native-fresh/`. These are independent single-PBS proofs with within-proof authentication sharing, not cross-statement aggregation. The older BabyBear quintic 21-proof union inventory is only 125.71 bits and is not the selected joint profile. All six v6 joint 1/4/16 original-size certificates now pass, covering 42 fresh statements with archived fixtures matched under `target/performance/joint-pbs-native/`. Whole-proof Fiat–Shamir/composition, further cross-statement stage sharing and performance promotion remain open |
+| Full validation at batches 1/4/16 | Original-size independent validation through v5 and joint-Hadamard v6/v7 validation complete; further batch sharing incomplete | Original ring-1024/LWE-728 dimensions and original output keys are preserved. Selected BabyBear degree 6/shifted-helper and Goldilocks degree 3/width 4 profiles pass all 42 original-size fresh v4 cases, with archived native statements/keys/parameters/layouts matched; their conditional 21-proof interactive inventories are 130.51/130.16 bits. Version 5 passes all 42 fresh toy cases and sixteen native repeated-statement comparison certificates (including v4 controls); all 42 fresh original-size v5 cases also pass with exact archived fixture matches in correctness-only processes under `target/performance/deferred-pbs-native-fresh/`. These are independent single-PBS proofs with within-proof authentication sharing, not cross-statement aggregation. The older BabyBear quintic 21-proof union inventory is only 125.71 bits and is not the selected joint profile. All six v6 joint 1/4/16 original-size certificates now pass, covering 42 fresh statements with archived fixtures matched under `target/performance/joint-pbs-native/`. Whole-proof Fiat–Shamir/composition, further cross-statement stage sharing and performance promotion remain open |
 | Promotion and rollout | Not achieved | Artifact engineering speedup is verified, but it does not meet the new backend's security/completeness gate |
 
 ## Composition acceptance checks
