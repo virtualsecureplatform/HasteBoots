@@ -1,6 +1,7 @@
 // Select the Hadamard certificate while leaving key-switch product proofs on
 // their original backend. These helpers exist only in adversarial test modules.
 macro_rules! audit_decomposition_type {
+    (Shared,$extension:ty) => {decomp::shared::Proof<F,$extension,[u8;32]>};
     (Canonical,$extension:ty) => {audit_decomposition_type!(Joint,$extension)};
     (Joint,$extension:ty) => {decomp::deferred::Proof<F,$extension,[u8;32]>};
     (Deferred,$extension:ty) => {decomp::deferred::Proof<F,$extension,[u8;32]>};
@@ -8,6 +9,7 @@ macro_rules! audit_decomposition_type {
     ($kind:ident,$extension:ty) => { decomp::ExtensionProof<F,$extension,[u8;32]> };
 }
 macro_rules! audit_hadamard_helpers {
+    (Shared,$extension:ty) => {audit_hadamard_helpers!(Aggregated,$extension);};
     (Canonical,$extension:ty) => {audit_hadamard_helpers!(Joint,$extension);};
     (Joint,$extension:ty) => {
         type HadamardProof=();
@@ -188,6 +190,9 @@ macro_rules! complete_foreign_trace_case {
     };
     (@aggregated $module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr, $extension:ty) => {
         complete_foreign_trace_case!(@backend Aggregated,$module,$field,$prove,$verify,$pbs_prove,$pbs_verify,$version,$domain,$width,$repetitions,$extension);
+    };
+    (@shared $module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr, $extension:ty) => {
+        complete_foreign_trace_case!(@backend Shared,$module,$field,$prove,$verify,$pbs_prove,$pbs_verify,$version,$domain,$width,$repetitions,$extension);
     };
     (@deferred $module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr, $extension:ty) => {
         complete_foreign_trace_case!(@backend Deferred,$module,$field,$prove,$verify,$pbs_prove,$pbs_verify,$version,$domain,$width,$repetitions,$extension);

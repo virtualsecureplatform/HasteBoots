@@ -18,6 +18,10 @@ use serde::{Deserialize, Serialize};
 
 /// Canonical comparisons with shared terminal source authentication.
 pub mod deferred;
+/// Shared-query comparison algebra and canonical authentication across limbs.
+pub mod shared;
+/// Shared-query canonical comparison entry points.
+pub use shared::{prove as prove_shared,verify as verify_shared};
 /// Deferred canonical comparison entry points, for complete-protocol composition.
 pub use deferred::{prove as prove_deferred,verify as verify_deferred};
 
@@ -581,6 +585,7 @@ where
     type Proof;
     const EXTENSION: bool = false;
     const DEFERRED: bool = false;
+    const SHARED: bool = false;
     fn bind_domain(_trans: &mut Transcript<F>) {}
     fn comparison_packets(limbs: usize) -> usize {
         limbs

@@ -78,6 +78,23 @@ where
         let mut prover = Transcript::new_direct();
         let proof =
             lookup::prove::<F, EF, Sha256, _>(&mut prover, &helper, &refs, &requests).unwrap();
+        let mut statistics = snarks::packed_extension_lookup::ProverStatistics::default();
+        let mut measured_transcript = Transcript::new_direct();
+        let measured = lookup::prove_with_statistics::<F, EF, Sha256, _>(
+            &mut measured_transcript,
+            &helper,
+            &refs,
+            &requests,
+            &mut statistics,
+        )
+        .unwrap();
+        assert_eq!(
+            bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap(),
+            bincode::serde::encode_to_vec(&measured, bincode::config::standard()).unwrap()
+        );
+        assert!(statistics.sumcheck > std::time::Duration::ZERO);
+        assert!(statistics.openings > std::time::Duration::ZERO);
+        assert_eq!(statistics.zero_check, std::time::Duration::ZERO);
         assert_eq!(proof.source_opening.opening.columns.len(), 2);
         assert_eq!(proof.algebra.instances.len(), 2 * proof.helper_roots.len());
         let bytes = bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap();

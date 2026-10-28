@@ -76,9 +76,9 @@ pub struct ProverStatistics {
     pub preparation: std::time::Duration,
     /// Committing reciprocal helpers.
     pub commitment: std::time::Duration,
-    /// Sum claims and packed sumcheck.
+    /// Sumcheck algebra, including joint sum/identity checks in the shared backend.
     pub sumcheck: std::time::Duration,
-    /// Constructing factors and packed ZeroCheck.
+    /// Separate ZeroCheck work; the shared backend counts fused algebra above.
     pub zero_check: std::time::Duration,
     /// Evaluating canonical terminal claims and checking public factors.
     pub terminal_evaluation: std::time::Duration,

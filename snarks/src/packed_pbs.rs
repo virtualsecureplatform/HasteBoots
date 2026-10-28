@@ -33,6 +33,10 @@ pub const EXTENSION_PROTOCOL_VERSION: u32 = 3;
 pub const AGGREGATED_PROTOCOL_VERSION: u32 = 4;
 /// Opt-in aggregated Hadamard protocol with deferred canonical lookup sources.
 pub const DEFERRED_PROTOCOL_VERSION:u32=5;
+/// Complete shared-query comparison protocol, opt-in and non-hiding.
+pub const SHARED_PROTOCOL_VERSION:u32=8;
+/// Full-extension shared sum/identity comparisons and canonical authentication.
+pub const SHARED_TRANSCRIPT_ID:&str="merlin-direct-shared-query-comparisons-v1";
 /// Direct extension lookup children with terminal source authentication per decomposition.
 pub const DEFERRED_TRANSCRIPT_ID:&str="merlin-direct-aggregated-hadamard-deferred-lookup-sources-v1";
 /// Direct parent/extension children plus multi-root Hadamard authentication.
@@ -218,6 +222,8 @@ pub type ExtensionProof<F, EF, O> = Proof<F, O, decomp::ExtensionProof<F, EF, O>
 pub type AggregatedProof<F, EF, O> = Proof<F, O, decomp::ExtensionProof<F, EF, O>, relation::aggregate::Proof<F, EF, O>>;
 /// Version-5 proof: shared lookup source authentication within each decomposition.
 pub type DeferredProof<F,EF,O>=Proof<F,O,decomp::deferred::Proof<F,EF,O>,relation::aggregate::Proof<F,EF,O>>;
+/// Version-8 complete proof with shared-query comparisons per decomposition.
+pub type SharedProof<F,EF,O>=Proof<F,O,decomp::shared::Proof<F,EF,O>,relation::aggregate::Proof<F,EF,O>>;
 /// Prover phase costs; public setup, native evaluation and serialization are external.
 #[derive(Default, Debug)]
 pub struct ProverStatistics {
@@ -344,6 +350,24 @@ where F:NTTField+Serialize,EF:algebra::AbstractExtensionField<F>+Serialize,
 {
     prove_impl::<F,H,C,decomp::deferred::Deferred<EF>,hadamard::Aggregated<EF>>(pp,setup,statement,trace,stats)
 }
+/// Prove all NAND stages with aggregated Hadamard and shared lookup sources.
+/// Experimental version 8; source sharing is within a decomposition, not across statements.
+pub fn prove_shared<F,EF,H,C>(pp:&Parameters<'_,C>,setup:&ProverSetup<F,H>,
+    statement:&Statement<'_,F>,trace:&PBSTrace<F>)->Result<SharedProof<F,EF,H::Output>,Error>
+where F:NTTField+Serialize,EF:algebra::AbstractExtensionField<F>+Serialize,
+      H:Hash+Send+Sync,C:RowCode<F>+Serialize,
+{
+    prove_shared_with_statistics::<F,EF,H,C>(pp,setup,statement,trace,&mut ProverStatistics::default())
+}
+/// Version-8 complete prover phase costs, including final source authentication.
+pub fn prove_shared_with_statistics<F,EF,H,C>(pp:&Parameters<'_,C>,setup:&ProverSetup<F,H>,
+    statement:&Statement<'_,F>,trace:&PBSTrace<F>,stats:&mut ProverStatistics)
+    ->Result<SharedProof<F,EF,H::Output>,Error>
+where F:NTTField+Serialize,EF:algebra::AbstractExtensionField<F>+Serialize,
+      H:Hash+Send+Sync,C:RowCode<F>+Serialize,
+{
+    prove_impl::<F,H,C,decomp::shared::Shared<EF>,hadamard::Aggregated<EF>>(pp,setup,statement,trace,stats)
+}
 
 fn prove_impl<F, H, C, B, R>(
     pp: &Parameters<'_, C>,
@@ -382,7 +406,7 @@ where
     B: decomp::Backend<F, H, C>,
     R: hadamard::Backend<F,H,C>,
 {
-    let version=if R::BATCHED { BATCH_PROTOCOL_VERSION } else if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
+    let version=if R::BATCHED { BATCH_PROTOCOL_VERSION } else if B::SHARED { SHARED_PROTOCOL_VERSION } else if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
     let timer = Instant::now();
     let cfg = &setup.verifier.config;
     pp.validate(cfg)?;
@@ -582,6 +606,14 @@ where F:NTTField+Serialize,EF:algebra::AbstractExtensionField<F>+Serialize,
 {
     verify_impl::<F,H,C,decomp::deferred::Deferred<EF>,hadamard::Aggregated<EF>>(pp,setup,statement,proof)
 }
+/// Verify a complete version-8 certificate using only trusted setup and ciphertexts.
+pub fn verify_shared<F,EF,H,C>(pp:&Parameters<'_,C>,setup:&VerifierSetup<H::Output>,
+    statement:&Statement<'_,F>,proof:&SharedProof<F,EF,H::Output>)->Result<(),Error>
+where F:NTTField+Serialize,EF:algebra::AbstractExtensionField<F>+Serialize,
+      H:Hash+Send+Sync,C:RowCode<F>+Serialize,
+{
+    verify_impl::<F,H,C,decomp::shared::Shared<EF>,hadamard::Aggregated<EF>>(pp,setup,statement,proof)
+}
 
 fn verify_impl<F, H, C, B, R>(
     pp: &Parameters<'_, C>,
@@ -596,7 +628,7 @@ where
     B: decomp::Backend<F, H, C>,
     R: hadamard::Backend<F,H,C>,
 {
-    let version=if R::BATCHED { BATCH_PROTOCOL_VERSION } else if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
+    let version=if R::BATCHED { BATCH_PROTOCOL_VERSION } else if B::SHARED { SHARED_PROTOCOL_VERSION } else if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
     if proof.protocol_version
         != version
     {
@@ -766,6 +798,7 @@ where
             PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS v2".as_slice(),
             EXTENSION_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS extension comparisons v3".as_slice(),
             BATCH_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS joint batch member v6".as_slice(),
+            SHARED_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS shared-query comparisons v8".as_slice(),
             DEFERRED_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS deferred lookup sources v5".as_slice(),
             AGGREGATED_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS aggregated Hadamard v4".as_slice(),
             _ => return Err(error("unsupported complete PBS protocol version")),

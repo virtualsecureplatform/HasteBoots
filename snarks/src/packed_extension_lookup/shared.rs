@@ -152,8 +152,33 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
+    prove_with_statistics::<F, EF, H, C>(
+        parent,
+        helper,
+        sources,
+        requests,
+        &mut ProverStatistics::default(),
+    )
+}
+/// Prove with phase counters. Joint sum/identity algebra is counted in
+/// `sumcheck`; `zero_check` is reserved for a separate ZeroCheck invocation.
+pub fn prove_with_statistics<F, EF, H, C>(
+    parent: &mut Transcript<F>,
+    helper: &Parameters<C>,
+    sources: &[&ProverOracle<'_, F, H, C>],
+    requests: &[Request<F>],
+    statistics: &mut ProverStatistics,
+) -> Result<Proof<F, EF, H::Output>, Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    C: RowCode<F> + Serialize,
+{
     let witness: Vec<_> = sources.iter().map(|s| s.table).collect();
-    prove_inner::<F, EF, H, C>(parent, helper, sources, requests, &witness, true)
+    prove_inner::<F, EF, H, C>(
+        parent, helper, sources, requests, &witness, true, statistics,
+    )
 }
 fn prove_inner<F, EF, H, C>(
     parent: &mut Transcript<F>,
@@ -162,6 +187,7 @@ fn prove_inner<F, EF, H, C>(
     requests: &[Request<F>],
     witness: &[&PackedTable<F>],
     strict: bool,
+    statistics: &mut ProverStatistics,
 ) -> Result<Proof<F, EF, H::Output>, Error>
 where
     F: PrimeField + Serialize,
@@ -169,6 +195,7 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
+    let timer = std::time::Instant::now();
     let public: Vec<_> = sources.iter().map(|s| s.verifier()).collect();
     let (n, k, count) = preflight::<F, EF, H, C>(parent, helper, &public, requests)?;
     if witness.len() != sources.len() {
@@ -231,6 +258,8 @@ where
         .iter()
         .map(|h| bridge::table::<F, EF>(n, k, &h.evaluations).map_err(convert))
         .collect::<Result<_, _>>()?;
+    statistics.preparation += timer.elapsed();
+    let timer = std::time::Instant::now();
     let committed: Vec<_> = helper_tables
         .iter()
         .map(|t| helper.commit::<F, H>(t).map_err(convert))
@@ -238,6 +267,8 @@ where
     drop(helper_tables);
     let helper_roots: Vec<_> = committed.iter().map(|(r, _)| r.clone()).collect();
     child.append_message(b"shared lookup helper roots", &helper_roots);
+    statistics.commitment += timer.elapsed();
+    let timer = std::time::Instant::now();
     let mut polys = Vec::with_capacity(2 * count);
     let mut sums = Vec::new();
     let mut eq_points = Vec::new();
@@ -278,7 +309,11 @@ where
         eq_points.push(eq_point);
     }
     let refs: Vec<_> = polys.iter().collect();
+    statistics.preparation += timer.elapsed();
+    let timer = std::time::Instant::now();
     let (algebra, states) = sumcheck::batch::prove(&mut child, &refs, &sums).map_err(convert)?;
+    statistics.sumcheck += timer.elapsed();
+    let timer = std::time::Instant::now();
     // Only folded terminal states are needed after the algebra completes.
     drop(refs);
     drop(polys);
@@ -330,6 +365,8 @@ where
         &(&source_values, &helper_values),
     );
     finish_child(parent, &mut child);
+    statistics.terminal_evaluation += timer.elapsed();
+    let timer = std::time::Instant::now();
     let helper_query = bridge::coefficients_query::<F, EF>(k, point).map_err(convert)?;
     let helper_claims: Vec<_> = helper_values
         .iter()
@@ -356,6 +393,7 @@ where
         &source_values,
     )
     .map_err(convert)?;
+    statistics.openings += timer.elapsed();
     Ok(Proof {
         multiplicities,
         helper_roots,
@@ -554,6 +592,7 @@ mod tests {
                 &requests,
                 &fake.iter().collect::<Vec<_>>(),
                 false,
+                &mut ProverStatistics::default(),
             )
             .unwrap();
             let bytes = bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap();
