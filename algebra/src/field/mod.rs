@@ -94,6 +94,21 @@ pub trait Field:
 
     /// Gets inner value.
     fn value(self) -> Self::Value;
+
+    /// Return the same mathematical element in its unique wire representation.
+    /// Fields with lazy representatives must override this identity default.
+    /// Extension implementations must normalize every coordinate, not just value().
+    #[inline]
+    fn canonicalized(self) -> Self {
+        self
+    }
+
+    /// Whether this element already uses its unique wire representation.
+    /// This default is for fields whose arithmetic/constructors are canonical.
+    #[inline]
+    fn is_canonical(self) -> bool {
+        true
+    }
 }
 
 /// A trait defined for decomposable field, this is mainly for base field in FHE.

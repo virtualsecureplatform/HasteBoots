@@ -178,6 +178,18 @@ impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> Field
     fn value(self) -> Self::Value {
         self.value[0].value()
     }
+
+    #[inline]
+    fn canonicalized(self) -> Self {
+        Self {
+            value: self.value.map(Field::canonicalized),
+        }
+    }
+
+    #[inline]
+    fn is_canonical(self) -> bool {
+        self.value.iter().all(|v| v.is_canonical())
+    }
 }
 
 impl<F: Field + BinomialExtensionParameters<D> + Packable, const D: usize> Display

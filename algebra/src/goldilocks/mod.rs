@@ -59,6 +59,16 @@ impl Field for Goldilocks {
     fn value(self) -> Self::Value {
         to_canonical_u64(self.0)
     }
+
+    #[inline]
+    fn canonicalized(self) -> Self {
+        Self(to_canonical_u64(self.0))
+    }
+
+    #[inline]
+    fn is_canonical(self) -> bool {
+        self.0 < modulus::GOLDILOCKS_P
+    }
 }
 
 impl DecomposableField for Goldilocks {
