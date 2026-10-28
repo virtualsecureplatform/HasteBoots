@@ -21,6 +21,20 @@ check and release builds pass. The `deferred_lookup` example compares immediate
 and deferred authentication for 1/4/16 shared-source lookup groups; twelve toy
 serialized packets verify across BabyBear and Goldilocks. These are smoke checks,
 not native performance evidence or a whole-proof security certificate.
+Subsequent serial native-capacity comparisons verify 24 packets (168 lookup
+instances) in two reversed field/method orders with exact repeated proof hashes.
+At sixteen groups, bytes fall 25.89%/31.38%; BabyBear complete component time is
+0.64–1.88% lower, while Goldilocks varies from 2.60% lower to 3.69% higher.
+This supports opt-in size reduction, not the complete-PBS latency gate. See
+`packed-deferred-lookups.md` and `target/performance/deferred-lookup/native/`.
+`packed_decomposition::deferred` now uses a canonical digit/borrow registry to
+share source authentication across limb comparisons, retaining reconstruction
+and zero borrow endpoint checks. Eleven decomposition/lookup regression tests,
+nine lookup unit tests, 81 Python tests and workspace/release checks pass. Eight
+decoded complete v3/v4 certificates retain exact archived bytes/hashes and
+statement/key/parameter bindings after the comparison backend refactor. This is
+a component integration; complete PBS routing and native decomposition timings
+remain pending.
 
 Complete protocol version 4 now offers opt-in aggregated Hadamard authentication
 with the same trusted bootstrapping-key roots and canonical source linkage.
