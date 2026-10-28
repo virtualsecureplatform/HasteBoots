@@ -32,6 +32,43 @@ fn secret<F: NTTField>(seed: u64) -> SecretKeyPack<F> {
     bytes[..8].copy_from_slice(&seed.to_le_bytes());
     SecretKeyPack::with_rng(params::<F>(), Prg::from_seed(Block::from(bytes)))
 }
+// Keep wire-shape assertions explicit for each comparison backend.
+macro_rules! assert_comparison_shape {
+    (DeferredProof,$proof:expr) => {
+        for d in $proof.decomposition.iter().chain(std::iter::once(&$proof.key_switch.decomposition)) {
+            assert_eq!(d.comparisons.len(),1);
+            assert_eq!(d.comparisons[0].lookups.len()+1,d.borrow_commitments.len());
+            assert!(d.comparisons[0].lookups.iter().all(|p|p.groups.len()==1 && p.source_openings.is_empty()));
+        }
+    };
+    ($kind:ident,$proof:expr) => {
+        for d in $proof.decomposition.iter().chain(std::iter::once(&$proof.key_switch.decomposition)) {
+            assert!(d.comparisons.iter().all(|p|p.groups.len()==1));
+        }
+    };
+}
+macro_rules! reject_deferred_packets {
+    (DeferredProof,$proof:expr,$reject:expr,$one:expr) => {
+        for stage in 0..3 {
+            for mutation in 0..7 {
+                let mut bad=$proof.clone();
+                let d=if stage==2 {&mut bad.key_switch.decomposition} else {&mut bad.decomposition[stage]};
+                match mutation {
+                    0=>{d.comparisons.clear();},
+                    1=>{d.comparisons.push(d.comparisons[0].clone());},
+                    2=>{d.comparisons[0].lookups.pop();},
+                    3=>{d.comparisons[0].source_authentication.openings.pop();},
+                    4=>{d.comparisons[0].lookups[0].groups[0].source_values[0][0]+=$one;},
+                    5=>{let opening=d.comparisons[0].source_authentication.openings[0].clone();
+                        d.comparisons[0].lookups[0].source_openings.push(opening);},
+                    _=>{d.comparisons[0].lookups.swap(0,1);},
+                }
+                assert!($reject(&bad),"stage {stage} mutation {mutation}");
+            }
+        }
+    };
+    ($kind:ident,$proof:expr,$reject:expr,$one:expr) => {};
+}
 macro_rules! native_extension_roundtrip {
     ($test:ident,$field:ty,$extension:ty) => {
         native_extension_roundtrip!($test, $field, $extension, 8);
@@ -102,21 +139,7 @@ macro_rules! native_extension_roundtrip {
                         pbs::$prove::<F, EF, Sha256, _>(&pp, &setup, &statement, &trace)
                             .unwrap();
                     assert_eq!(proof.protocol_version, $version);
-                    assert!(
-                        proof
-                            .decomposition
-                            .iter()
-                            .flat_map(|d| &d.comparisons)
-                            .all(|p| p.groups.len() == 1)
-                    );
-                    assert!(
-                        proof
-                            .key_switch
-                            .decomposition
-                            .comparisons
-                            .iter()
-                            .all(|p| p.groups.len() == 1)
-                    );
+                    assert_comparison_shape!($proof_type,proof);
                     drop(trace);
                     let bytes =
                         bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap();
@@ -165,7 +188,8 @@ macro_rules! native_extension_roundtrip {
                     pbs::$verify::<F, EF, Sha256, _>(&pp, &expected, &statement, proof)
                         .is_err()
                 };
-                for version in [1,2,3,4] {
+                reject_deferred_packets!($proof_type,proof,reject,F::from(1usize));
+                for version in [1,2,3,4,5] {
                     if version != $version {
                         let mut bad = proof.clone();
                         bad.protocol_version = version;
@@ -403,3 +427,20 @@ complete_foreign_trace_case!(@aggregated complete_aggregated_foreign_trace_goldi
     algebra::Goldilocks,prove_extension,verify_extension,prove_aggregated,verify_aggregated,
     snarks::packed_pbs::AGGREGATED_PROTOCOL_VERSION,
     b"HasteBoots complete binary NAND PBS aggregated Hadamard v4",4,1,algebra::GoldilocksExtension3);
+
+// Complete decoded version-5 certificates across all NAND pairs and fresh 1/4/16 groups.
+native_extension_roundtrip!(babybear_deferred_complete_batches_and_binding,
+    BabyBear,algebra::BabyBearExtension6,8,1,
+    prove_deferred,verify_deferred,DeferredProof,pbs::DEFERRED_PROTOCOL_VERSION);
+native_extension_roundtrip!(goldilocks_deferred_complete_batches_and_binding,
+    Goldilocks,algebra::GoldilocksExtension3,4,0,
+    prove_deferred,verify_deferred,DeferredProof,pbs::DEFERRED_PROTOCOL_VERSION);
+
+complete_foreign_trace_case!(@deferred complete_deferred_foreign_trace_babybear,
+    algebra::BabyBear,prove_deferred,verify_deferred,prove_deferred,verify_deferred,
+    pbs::DEFERRED_PROTOCOL_VERSION,
+    b"HasteBoots complete binary NAND PBS deferred lookup sources v5",8,1,algebra::BabyBearExtension6);
+complete_foreign_trace_case!(@deferred complete_deferred_foreign_trace_goldilocks,
+    algebra::Goldilocks,prove_deferred,verify_deferred,prove_deferred,verify_deferred,
+    pbs::DEFERRED_PROTOCOL_VERSION,
+    b"HasteBoots complete binary NAND PBS deferred lookup sources v5",4,1,algebra::GoldilocksExtension3);

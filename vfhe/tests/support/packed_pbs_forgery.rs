@@ -1,10 +1,12 @@
 // Select the Hadamard certificate while leaving key-switch product proofs on
 // their original backend. These helpers exist only in adversarial test modules.
 macro_rules! audit_decomposition_type {
-    () => { decomp::LaneProof<F,[u8;32]> };
-    ($extension:ty) => { decomp::ExtensionProof<F,$extension,[u8;32]> };
+    (Deferred,$extension:ty) => {decomp::deferred::Proof<F,$extension,[u8;32]>};
+    ($kind:ident) => { decomp::LaneProof<F,[u8;32]> };
+    ($kind:ident,$extension:ty) => { decomp::ExtensionProof<F,$extension,[u8;32]> };
 }
 macro_rules! audit_hadamard_helpers {
+    (Deferred,$extension:ty) => {audit_hadamard_helpers!(Aggregated,$extension);};
     (Independent $(,$extension:ty)?) => {
         type HadamardProof=relation::RelationProof<F,[u8;32]>;
         fn hadamard_with_declared_roots(prover:&mut Transcript<F>,reference:&mut Transcript<F>,
@@ -45,6 +47,9 @@ macro_rules! complete_foreign_trace_case {
     (@aggregated $module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr, $extension:ty) => {
         complete_foreign_trace_case!(@backend Aggregated,$module,$field,$prove,$verify,$pbs_prove,$pbs_verify,$version,$domain,$width,$repetitions,$extension);
     };
+    (@deferred $module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr, $extension:ty) => {
+        complete_foreign_trace_case!(@backend Deferred,$module,$field,$prove,$verify,$pbs_prove,$pbs_verify,$version,$domain,$width,$repetitions,$extension);
+    };
     (@backend $kind:ident,$module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr $(, $extension:ty)?) => {
         mod $module {
             use super::{params, secret};
@@ -69,7 +74,7 @@ macro_rules! complete_foreign_trace_case {
             type F = $field;
             type C = BlockReedSolomonCode<F>;
             audit_hadamard_helpers!($kind $(,$extension)?);
-            type FullProof=pbs::Proof<F,[u8;32],audit_decomposition_type!($($extension)?),HadamardProof>;
+            type FullProof=pbs::Proof<F,[u8;32],audit_decomposition_type!($kind $(,$extension)?),HadamardProof>;
             struct Sources {
                 tables: Vec<PackedTable<F>>,
                 roots: Vec<Commitment<[u8; 32]>>,
@@ -336,7 +341,7 @@ macro_rules! complete_foreign_trace_case {
                 final_acc: &[F],
                 requested: &pbs::Statement<'_, F>,
                 actual: &pbs::Statement<'_, F>,
-            ) -> ks::Proof<F, [u8; 32] $(, decomp::ExtensionProof<F, $extension, [u8; 32]>)?> {
+            ) -> ks::Proof<F,[u8;32],audit_decomposition_type!($kind $(,$extension)?)> {
                 let n = final_acc.len() / 2;
                 let width = pp.final_source.width();
                 let d = expected.roots().len();
