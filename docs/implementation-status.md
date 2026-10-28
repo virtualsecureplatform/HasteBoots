@@ -7,6 +7,15 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+The deferred canonical opening registry now uses a statically selected PCS
+boundary shared by Brakedown and the masked packed adapter. Legacy API aliases
+retain their wire/transcript behavior against a frozen pre-refactor reference.
+Masked aliases share lifetime counters, unused sources spend nothing and failed
+later roots do not refund prior openings. All 78 selected component/complete-PBS tests and the locked workspace check pass,
+including sixty fresh full binding cases. See `canonical-packed-backends.md`.
+Remaining concrete relation/setup types still need generalization before masked
+complete-PBS integration can be claimed.
+
 A masked direct packed matrix adapter now retains one logical base table,
 canonical extension root and locked private mask session. It binds complete
 contexts and ordered claims, uses direct extension child transcripts and checks

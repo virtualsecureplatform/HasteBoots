@@ -85,3 +85,7 @@ The six digest-linked packet records, checked opening/index schedules, full logs
 and validated sources are archived under
 `target/performance/masked-packed-matrix-adapter/`, source SHA-256
 `6d7fe12bcb403d0f51d07709b0412faa901a39af945c614f32bacea6cad79bcf`.
+
+The common canonical backend boundary and deferred registry now dispatch both
+Brakedown and this adapter. See `canonical-packed-backends.md` for alias rules,
+legacy byte controls and the remaining complete-PBS boundaries.

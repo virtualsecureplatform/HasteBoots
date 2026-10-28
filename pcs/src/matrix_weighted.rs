@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 
 /// Experimental multi-root aggregation for one common ordered matrix query.
 pub mod aggregate;
+/// Statically selected canonical packed-oracle backend interface.
+pub mod backend;
 /// Experimental bounded-reuse direct packed PolyFRIM adapter.
 pub mod masked_polyfrim;
 

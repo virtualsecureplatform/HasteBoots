@@ -19,11 +19,46 @@ pub struct ProverOracle<'a, F, H: Hash + Send + Sync, C> {
 }
 
 /// Verifier access to a canonical commitment and its trusted parameters.
-pub struct VerifierOracle<'a, O, C> {
-    /// Trusted encoding and table dimensions, not copied from a proof.
-    pub parameters: &'a Parameters<C>,
-    /// Expected canonical commitment.
+pub struct CanonicalVerifierOracle<'a, O, P> {
+    /// Complete trusted backend parameters and logical dimensions.
+    pub parameters: &'a P,
+    /// Expected canonical root, supplied by the caller.
     pub commitment: &'a Commitment<O>,
+}
+/// Legacy Brakedown oracle spelling, preserving existing callers.
+pub type VerifierOracle<'a, O, C> = CanonicalVerifierOracle<'a, O, Parameters<C>>;
+
+/// Prover references for a trusted canonical backend, without a second table view.
+pub struct CanonicalProverOracle<'a, F, H, P>
+where
+    F: algebra::PrimeField,
+    H: Hash + Send + Sync,
+    P: pcs::matrix_weighted::backend::CanonicalPcs<F, H>,
+{
+    /// Complete trusted backend parameters.
+    pub parameters: &'a P,
+    /// Root shared by every relation referring to this table.
+    pub commitment: &'a Commitment<H::Output>,
+    /// Private retained state, including any bounded mask session.
+    pub state: &'a P::State,
+}
+impl<'a, F, H, P> CanonicalProverOracle<'a, F, H, P>
+where
+    F: algebra::PrimeField,
+    H: Hash + Send + Sync,
+    P: pcs::matrix_weighted::backend::CanonicalPcs<F, H>,
+{
+    /// Borrow the backend's actual retained logical table for prover algebra.
+    pub fn table(&self) -> &PackedTable<F> {
+        P::table(self.state)
+    }
+    /// Remove private state access before public verification.
+    pub fn verifier(&self) -> CanonicalVerifierOracle<'a, H::Output, P> {
+        CanonicalVerifierOracle {
+            parameters: self.parameters,
+            commitment: self.commitment,
+        }
+    }
 }
 
 impl<'a, F, H: Hash + Send + Sync, C> ProverOracle<'a, F, H, C> {

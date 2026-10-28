@@ -186,7 +186,7 @@ where
             },
         ))
     }
-    fn claims(
+    pub(crate) fn claims(
         &self,
         queries: &[Vec<MatrixPair<F>>],
         values: &[Vec<F>],
