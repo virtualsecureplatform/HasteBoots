@@ -7,6 +7,17 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Shared-challenge ZeroCheck now pools folded buffers by immutable source-object
+identity. A shared public-key factor folds once per round, while every relation
+keeps its own equality factor, messages and equation checks. No alias routing is
+serialized. Both complete batch formats pass the eighteen targeted release tests
+and forty reconstructed certificates. Twelve complete wire controls covering 84
+fresh member instances preserve earlier v6/v7 bytes and hashes exactly. At
+sixteen members, eliminating duplicate
+public-key first-fold buffers removes another 0.46875/1.875 GiB of requested
+storage, beyond borrowing the original sources. Native memory and latency gains
+are unmeasured. See `packed-borrowed-batches.md`.
+
 Complete v6/v7 batch proving now borrows retained source tables instead of
 cloning every Hadamard factor into a second buffer. At native batch size sixteen,
 this removes 2.125/8.25 GiB of requested field-buffer storage for BabyBear and
