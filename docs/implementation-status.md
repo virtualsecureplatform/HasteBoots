@@ -7,6 +7,18 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Opt-in complete outer version 7 now deduplicates repeated canonical Hadamard
+roots under a common query. Every member retains version 6 constraints and every
+relation equation is checked independently; conflicting aliases reject before
+random aggregation. Complete 1/4/16 decoded public tests pass for both fields,
+as do canonical relation/PCS tests and all 86 Python checks. The implementation
+shares protocol bodies while retaining old domains and formats. Native validation,
+comparative measurements and fresh complete v7 malicious-child audits remain
+open. Two-order toy runs verify 24 packets covering 168 member instances; all
+twelve v6 wire controls match archived bytes. At sixteen members, toy bytes fall
+3.28%/6.76% with repeated hashes exact. Original-size native correctness is running
+serially. See `packed-canonical-pbs.md`.
+
 Complete experimental version 6 now composes ordered NAND PBS batches with one
 cross-statement Hadamard certificate. The private member backend omits only that
 relation; the public batch verifier always authenticates it jointly and checks
