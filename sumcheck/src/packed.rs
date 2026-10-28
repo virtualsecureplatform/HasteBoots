@@ -283,12 +283,13 @@ pub fn sum<F: PrimeField>(
 
 pub(crate) fn validate_tables<F: PrimeField>(
     shape: &PackedShape<F>,
-    tables: &[PackedTable<F>],
+    tables: &[impl std::borrow::Borrow<PackedTable<F>>],
 ) -> Result<(), Error> {
     if tables.len() != shape.num_factors {
         return Err(reject("incorrect packed factor count"));
     }
     for table in tables {
+        let table = table.borrow();
         table.validate().map_err(shape_error)?;
         if table.num_vars() != shape.num_vars || table.width() != shape.width {
             return Err(reject("incorrect packed factor shape"));
@@ -310,7 +311,11 @@ fn bind<F: PrimeField + Serialize>(
     Ok(())
 }
 
-pub(crate) fn check_round<F: Field>(width: usize, evaluations: &[F], expected: &[F]) -> Result<(), Error> {
+pub(crate) fn check_round<F: Field>(
+    width: usize,
+    evaluations: &[F],
+    expected: &[F],
+) -> Result<(), Error> {
     for lane in 0..width {
         if evaluations[2 * lane] + evaluations[2 * lane + 1] != expected[lane] {
             return Err(reject("packed round inconsistent with claim"));
@@ -366,12 +371,13 @@ pub(crate) fn extrapolate<F: Field>(
 // Cell-constant factors have the same 2k interpolation inputs for every
 // suffix. Cache their evaluations once, without reordering product arithmetic.
 pub(crate) fn constant_interpolations<F: Field>(
-    tables: &[PackedTable<F>],
+    tables: &[impl std::borrow::Borrow<PackedTable<F>> + Sync],
     degree: usize,
 ) -> Vec<Option<Vec<F>>> {
     tables
         .par_iter()
         .map(|table| {
+            let table = table.borrow();
             if table
                 .constant_lanes()
                 .expect("validated packed factor")

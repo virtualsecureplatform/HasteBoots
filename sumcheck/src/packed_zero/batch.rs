@@ -75,6 +75,21 @@ pub fn prove<F: PrimeField + Serialize>(
     shapes: &[PackedShape<F>],
     factors: &[&[PackedTable<F>]],
 ) -> Result<(Proof<F>, Vec<ZeroSubclaim<F>>, Vec<Vec<Vec<F>>>), Error> {
+    let borrowed: Vec<Vec<_>> = factors
+        .iter()
+        .map(|tables| tables.iter().collect())
+        .collect();
+    let slices: Vec<_> = borrowed.iter().map(Vec::as_slice).collect();
+    prove_borrowed(trans, shapes, &slices)
+}
+
+/// Borrow canonical source tables without cloning their field buffers.
+/// This uses exactly the same transcript and arithmetic as [`prove`].
+pub fn prove_borrowed<F: PrimeField + Serialize>(
+    trans: &mut Transcript<F>,
+    shapes: &[PackedShape<F>],
+    factors: &[&[&PackedTable<F>]],
+) -> Result<(Proof<F>, Vec<ZeroSubclaim<F>>, Vec<Vec<Vec<F>>>), Error> {
     let degrees = bind(trans, shapes)?;
     if factors.len() != shapes.len() {
         return Err(reject("packed ZeroCheck batch factor count"));

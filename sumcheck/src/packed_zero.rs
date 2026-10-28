@@ -173,7 +173,7 @@ where
 
 fn first_evaluations<F: PrimeField>(
     shape: &PackedShape<F>,
-    factors: &[PackedTable<F>],
+    factors: &[impl std::borrow::Borrow<PackedTable<F>> + Sync],
     degree: usize,
     equality: &[Vec<F>],
 ) -> Vec<Vec<F>> {
@@ -198,6 +198,7 @@ fn first_evaluations<F: PrimeField>(
             },
             |(mut total, mut at, mut scratch), b| {
                 for (i, (table, out)) in factors.iter().zip(&mut at).enumerate() {
+                    let table = table.borrow();
                     if cached[i].is_some() {
                         continue;
                     }
