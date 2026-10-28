@@ -1,7 +1,7 @@
 //! Canonical negative-a digits, native key products and original LWE extraction.
 //! This is a final-stage component, not a complete PBS or hiding certificate.
 use super::*;
-use algebra::{Field, AbstractExtensionField};
+use algebra::{AbstractExtensionField, Field};
 use sumcheck::packed::challenge_pair;
 /// Trusted logical geometries and lifetime budgets; never proof metadata.
 pub struct Parameters<'a, P> {
@@ -19,16 +19,20 @@ pub struct Extraction<F, S> {
     pub opening: S,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Proof<F: Field, EF: Field, O, S, B> {
+pub struct BackendProof<F: Field, O, S, B, D> {
     pub coefficients: Vec<Commitment<O>>,
     pub evaluations: Vec<Commitment<O>>,
     pub input: Commitment<O>,
     pub input_opening: S,
     pub ntt: Vec<packed_ntt::CanonicalProof<F, B>>,
     pub product: packed_relation::CanonicalRelationProof<F, S>,
-    pub decomposition: packed_decomposition::canonical::Proof<F, EF, O, S, B>,
+    pub decomposition: D,
     pub extraction: Extraction<F, S>,
 }
+/// Existing per-limb proof spelling and unchanged serialized field order.
+pub type Proof<F, EF, O, S, B> =
+    BackendProof<F, O, S, B, packed_decomposition::canonical::Proof<F, EF, O, S, B>>;
+mod comparison;
 fn preflight<F, EF, H, P>(
     pp: &Parameters<'_, P>,
     key: &ExpectedKey<H::Output>,
@@ -204,6 +208,26 @@ where
     P: CanonicalPcs<F, H>,
     R: Rng + CryptoRng,
 {
+    prove_inner::<F, EF, H, P, R, comparison::PerLimb>(trans, pp, key, acc, a, b, coefficients, rng)
+}
+fn prove_inner<F, EF, H, P, R, D>(
+    trans: &mut Transcript<F>,
+    pp: &Parameters<'_, P>,
+    key: &ProverKey<F, H, P>,
+    acc: &[F],
+    a: &[F],
+    b: F,
+    coefficients: &[PackedTable<F>],
+    rng: &mut R,
+) -> Result<BackendProof<F, H::Output, P::SingleProof, P::BatchProof, D::Proof>, Error>
+where
+    F: NTTField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    R: Rng + CryptoRng,
+    D: comparison::Comparison<F, EF, H, P>,
+{
     let acc = pp.coefficients.normalize_values(acc.to_vec());
     let a = pp.coefficients.normalize_values(a.to_vec());
     let b = pp.coefficients.normalize_values(vec![b])[0];
@@ -245,6 +269,7 @@ where
     drop(transformed);
     let input = input_dimensions(pp.input.num_vars(), pp.input.width(), cfg, &acc)?;
     let (input_root, input_state) = pp.input.commit(&input, rng).map_err(convert)?;
+    D::bind(trans);
     bind::<F, EF, H, P>(
         trans,
         pp,
@@ -290,7 +315,7 @@ where
         commitment: &input_root,
         state: &input_state,
     };
-    let decomposition = packed_decomposition::canonical::prove::<F, EF, H, P, R>(
+    let decomposition = D::prove(
         trans,
         &cfg.decomposition::<F>()?,
         &source,
@@ -298,8 +323,7 @@ where
         pp.helper,
         &co[..d].iter().collect::<Vec<_>>(),
         rng,
-    )
-    .map_err(convert)?;
+    )?;
     let (mask, target) = extraction_tables_dimensions(
         pp.coefficients.num_vars(),
         pp.coefficients.width(),
@@ -330,7 +354,7 @@ where
         .coefficients
         .open(trans, &roots[d], &states[d], &subclaim.query, &value)
         .map_err(convert)?;
-    Ok(Proof {
+    Ok(BackendProof {
         coefficients: roots,
         evaluations,
         input: input_root,
@@ -361,9 +385,28 @@ where
     H: Hash + Send + Sync,
     P: CanonicalPcs<F, H>,
 {
+    verify_inner::<F, EF, H, P, comparison::PerLimb>(trans, pp, key, acc, a, b, proof)
+}
+fn verify_inner<F, EF, H, P, D>(
+    trans: &mut Transcript<F>,
+    pp: &Parameters<'_, P>,
+    key: &ExpectedKey<H::Output>,
+    acc: &[F],
+    a: &[F],
+    b: F,
+    proof: &BackendProof<F, H::Output, P::SingleProof, P::BatchProof, D::Proof>,
+) -> Result<(), Error>
+where
+    F: NTTField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    D: comparison::Comparison<F, EF, H, P>,
+{
     let acc = pp.coefficients.normalize_values(acc.to_vec());
     let a = pp.coefficients.normalize_values(a.to_vec());
     let b = pp.coefficients.normalize_values(vec![b])[0];
+    D::bind(trans);
     bind::<F, EF, H, P>(
         trans,
         pp,
@@ -409,7 +452,7 @@ where
         &proof.product,
     )
     .map_err(convert)?;
-    packed_decomposition::canonical::verify::<F, EF, H, P>(
+    D::verify(
         trans,
         &cfg.decomposition::<F>()?,
         &CanonicalVerifierOracle {
@@ -426,8 +469,7 @@ where
             })
             .collect::<Vec<_>>(),
         &proof.decomposition,
-    )
-    .map_err(convert)?;
+    )?;
     let (mask, target) = extraction_tables_dimensions(
         pp.coefficients.num_vars(),
         pp.coefficients.width(),
