@@ -7,6 +7,12 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Shared-challenge polynomial identities now expose canonical backend
+authentication through the source registry, with retained borrowed factors and
+individually checked terminal equations. Existing optimized Brakedown paths are
+preserved. See `canonical-shared-relations.md`. Masked child openings remain
+independent; genuine joint aggregation and complete-PBS integration remain open.
+
 Single polynomial-relation authentication now has a canonical backend entry
 point. It borrows retained source tables, binds every ordered parameter context
 and root before ZeroCheck, and preserves legacy framing through typed wrappers.

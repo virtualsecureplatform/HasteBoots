@@ -76,3 +76,9 @@ Single polynomial relations now use canonical source descriptors and borrowed
 ZeroCheck factors. Contexts and roots are bound before algebra; legacy callers
 retain their original framing. See `canonical-packed-relation.md`. Shared/batched
 relations and complete-PBS setup integration remain outstanding.
+
+Shared polynomial identities also have a backend entry point using the existing
+canonical registry after shared-challenge ZeroCheck. It checks each equation
+individually and borrows retained factors. See `canonical-shared-relations.md`;
+this does not replace the existing optimized multi-root Brakedown path or claim
+masked joint aggregation.

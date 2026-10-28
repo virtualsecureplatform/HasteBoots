@@ -3,6 +3,8 @@
 //! This is a non-hiding component, not yet a complete cross-statement PBS batch.
 /// Shared relations with canonical root deduplication and distinct framing.
 pub mod canonical;
+/// Shared algebra with statically selected canonical backend authentication.
+pub mod backend;
 
 use super::*;
 use algebra::AbstractExtensionField;
