@@ -7,6 +7,12 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Masked preflight now omits the high coefficient half selected out by the fixed
+final `(I, 0)` query. The proof still authenticates the complete padded source.
+Frozen comparisons preserve full proof bytes and transcripts; BabyBear component
+proving improves while Goldilocks timings remain mixed. See
+`masked-logical-preflight.md`. Complete security/performance gates remain open.
+
 Masked opening preflight now reads data and mask lanes directly from the retained
 paired source, removing full split buffers and their input clones. Proof and
 budget semantics are unchanged. See `masked-borrowed-preflight.md`; the original

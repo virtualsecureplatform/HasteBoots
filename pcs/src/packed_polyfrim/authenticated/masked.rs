@@ -226,8 +226,9 @@ fn response<F: Field>(
     }
     Ok(polynomial.evaluate(F::zero()))
 }
-// Fold the selected half of each paired source cell without first materializing
-// or cloning its complete polynomial. The retained source remains immutable.
+// The final padded query is (I, 0), so high-variable coefficients cannot
+// contribute to either response. Read only the low half of the retained source
+// and fold it under the unpadded query, preserving all original matrix order.
 fn lane_response<F: Field>(
     source: &Polynomial<F>,
     width: usize,
@@ -238,10 +239,10 @@ fn lane_response<F: Field>(
     first
         .validate(width)
         .map_err(|_| Error("masked response fold"))?;
-    let mut coefficients = vec![F::zero(); source.coefficients.len() / 4];
+    let logical = &source.coefficients[..source.coefficients.len() / 2];
+    let mut coefficients = vec![F::zero(); logical.len() / 4];
     let mut sum = vec![F::zero(); width];
-    for (input, out) in source
-        .coefficients
+    for (input, out) in logical
         .chunks_exact(4 * width)
         .zip(coefficients.chunks_exact_mut(width))
     {
@@ -307,11 +308,11 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
     let query = canonical_query.as_slice();
     let claim = canonical_claim.as_slice();
     let padded = padded_query(pp, query, claim)?;
-    let data_claim = lane_response(&session.source.polynomial, pp.width, 0, &padded)?;
+    let data_claim = lane_response(&session.source.polynomial, pp.width, 0, query)?;
     if data_claim != claim {
         return Err(Error("false masked source claim"));
     }
-    let mask_claim = lane_response(&session.source.polynomial, pp.width, pp.width, &padded)?;
+    let mask_claim = lane_response(&session.source.polynomial, pp.width, pp.width, query)?;
     let mask_claim: Vec<_> = mask_claim.into_iter().map(Field::canonicalized).collect();
     let index = session.spent;
     session.spent += 1;
@@ -1251,13 +1252,29 @@ mod tests {
         let before = a.source.polynomial.coefficients.clone();
         let (data, mask) = split(&generic, &a);
         assert_eq!(
-            lane_response(&a.source.polynomial, 2, 0, &padded).unwrap(),
+            lane_response(&a.source.polynomial, 2, 0, &query).unwrap(),
             response(data, &padded).unwrap()
         );
         assert_eq!(
-            lane_response(&a.source.polynomial, 2, 2, &padded).unwrap(),
+            lane_response(&a.source.polynomial, 2, 2, &query).unwrap(),
             response(mask, &padded).unwrap()
         );
+        // Alter every high-padding coordinate independently. Neither response
+        // changes, although full source authentication still commits this half.
+        let mut changed = Polynomial {
+            width: a.source.polynomial.width,
+            coefficients: before.clone(),
+        };
+        let half = changed.coefficients.len() / 2;
+        for (i, value) in changed.coefficients[half..].iter_mut().enumerate() {
+            *value = E::from_base_fn(|j| -B::from(17 * i + 13 * j + 1));
+        }
+        for offset in [0, 2] {
+            assert_eq!(
+                lane_response(&changed, 2, offset, &query).unwrap(),
+                lane_response(&a.source.polynomial, 2, offset, &query).unwrap()
+            );
+        }
         assert_eq!(a.source.polynomial.coefficients, before);
         assert_eq!(a.spent(), 0);
 
