@@ -2,15 +2,17 @@
 //! Bind the ordered source commitments and statements before this component.
 //! Every recurrence is checked separately; terminal values still require
 //! authentication. This component supplies neither hiding nor a whole proof.
+#[cfg(test)]
+use crate::{IPForMLSumcheck, verifier::VerifierMsg};
 use crate::{
-    IPForMLSumcheck,
     error::Error,
     prover::ProverState,
-    verifier::{SubClaim, VerifierMsg, interpolate_uni_poly},
+    verifier::{SubClaim, interpolate_uni_poly},
 };
 use algebra::{Field, ListOfProductsOfPolynomials, PolynomialInfo};
 use helper::{FiatShamirTranscript, Transcript};
 use serde::{Deserialize, Serialize};
+mod pooled;
 
 /// Ordered independent certificates sharing a terminal evaluation point.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -75,6 +77,15 @@ pub fn prove<F: Field + Serialize>(
     polynomials: &[&ListOfProductsOfPolynomials<F>],
     claims: &[F],
 ) -> Result<(Proof<F>, Vec<ProverState<F>>), Error> {
+    let infos = preflight(trans, polynomials, claims)?;
+    pooled::prove(trans, polynomials, claims, &infos)
+}
+
+fn preflight<F: Field + Serialize>(
+    trans: &mut Transcript<F>,
+    polynomials: &[&ListOfProductsOfPolynomials<F>],
+    claims: &[F],
+) -> Result<Vec<PolynomialInfo>, Error> {
     let infos: Vec<_> = polynomials.iter().map(|p| p.info()).collect();
     bind(trans, &infos, claims)?;
     for p in polynomials {
@@ -102,6 +113,16 @@ pub fn prove<F: Field + Serialize>(
             return Err(reject("scalar batch polynomial shape"));
         }
     }
+    Ok(infos)
+}
+
+#[cfg(test)]
+fn prove_reference<F: Field + Serialize>(
+    trans: &mut Transcript<F>,
+    polynomials: &[&ListOfProductsOfPolynomials<F>],
+    claims: &[F],
+) -> Result<(Proof<F>, Vec<ProverState<F>>), Error> {
+    let infos = preflight(trans, polynomials, claims)?;
     let mut states: Vec<_> = polynomials
         .iter()
         .map(|p| IPForMLSumcheck::prover_init(p))
