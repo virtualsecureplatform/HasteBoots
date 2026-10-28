@@ -5,6 +5,8 @@
 //! Every source column remains authenticated; no combined root is trusted.
 //! This is a PCS component, not complete-PBS aggregation or an FS certificate.
 use super::*;
+/// Authenticate repeated canonical roots once at a shared query.
+pub mod canonical;
 use algebra::AbstractExtensionField;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
