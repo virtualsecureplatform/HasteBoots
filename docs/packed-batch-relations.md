@@ -109,8 +109,8 @@ all 349 Rust/manifest/lock inputs matched before measurement. Executable SHA-256
 After timing, only documentation and the heterogeneous-factor-count regression
 fixture changed; the measured production and benchmark sources remain identical.
 
-Complete PBS still needs a batch witness/session owner and canonical stage
-composition around this frontend. Independent full certificates, within-proof
-v5 sharing, and this relation component do not together constitute a complete
-cross-statement PBS batch. Hiding, independent security review and promotion
-also remain open.
+This frontend alone does not constitute a complete cross-statement PBS batch.
+Experimental version 6 now adds a batch witness owner and complete canonical
+stage composition around it, while retaining other constraints per member;
+see `packed-joint-pbs.md`. Its original-size validation, further stage sharing,
+hiding, independent security review and promotion remain separate open gates.
