@@ -189,3 +189,9 @@ entries are rejected. All eight cumulative rank cases and their negative control
 pass again under the new domains. Logs and validated sources are under
 `target/performance/direct-packed-polyfrim-canonical-v2/`, source SHA-256
 `df25739cc8212f0df4d37a7d6e6bbb44fc7348488e3a0a0d92ca1c8ebc496524`.
+
+A canonical base-field packed-oracle adapter now embeds logical tables and ordered
+matrix queries into direct extension challenges while retaining one private mask
+session. Its atomic multi-query calls and projection contract are described in
+`masked-packed-adapter.md`. Complete-PBS backend generalization and joint
+cross-query aggregation remain outstanding.

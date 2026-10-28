@@ -7,6 +7,16 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+A masked direct packed matrix adapter now retains one logical base table,
+canonical extension root and locked private mask session. It binds complete
+contexts and ordered claims, uses direct extension child transcripts and checks
+the entire batch budget before mutation. All 74 selected release tests pass,
+including 42 decoded openings at 1/4/16-query schedules over both selected fields.
+These are independent child openings on synthetic tables, not joint aggregation
+or complete PBS. See `masked-packed-adapter.md`; complete-PBS backend
+abstraction, joint query sharing, general masking and whole-proof security remain
+open.
+
 The experimental direct packed backend now has a revision-2 canonical encoding
 contract. Goldilocks and extension coordinates normalize before the new oracle
 and scalar-message encodings, with verifier rejection of noncanonical proof

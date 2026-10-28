@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 
 /// Experimental multi-root aggregation for one common ordered matrix query.
 pub mod aggregate;
+/// Experimental bounded-reuse direct packed PolyFRIM adapter.
+pub mod masked_polyfrim;
 
 /// Invalid parameters or a rejected matrix-weighted opening.
 #[derive(Debug, thiserror::Error)]
