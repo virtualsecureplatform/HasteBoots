@@ -26,9 +26,10 @@ future proofs, including repeated factors and decomposition uses. Replacing
 trusted setup with newly randomized roots is a new setup operation, not an
 implicit refresh of a retained owner.
 
-This is setup integration only. Other PBS stages still need backend-general
-proof composition, and there is no masked complete-PBS proof format or verifier
-in this module. The new setup does not hide public ZeroCheck/NTT messages, prove
+This module remains a setup boundary. Backend-general complete PBS composition
+is integrated separately in versions 10/11; see `canonical-joint-backend.md`.
+There is no complete-PBS proof format or verifier in this setup module.
+The new setup does not hide public ZeroCheck/NTT messages, prove
 robust vector proximity, complete adaptive hiding or certify whole-proof
 128-bit security. No native performance result follows from these component
 checks.
@@ -55,3 +56,12 @@ tests and twelve complete v7/v8/v9 PBS integration tests. Sixty fresh full
 binding cases preserve six accepted controls and fifty-four rejected attacks.
 The locked workspace check passes. Logs, checked records and validated sources
 are under `target/performance/canonical-native-key-setup-boundary/`.
+
+## Original-size masked resource validation
+
+Actual original native key owners are now measured with 128 sampling queries
+under both retained and transient cache policies. All 88 owner instantiations
+and eight decoded opening packets pass, with exact parameter/table/root/proof
+and transcript fingerprints across policies. See
+`native-masked-key-setup-profile.md` for the measured multi-owner memory
+reductions, added opening cost and the remaining complete-PBS/security gates.

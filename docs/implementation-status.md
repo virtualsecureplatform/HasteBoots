@@ -7,12 +7,23 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Original-size native masked key owners now pass resource validation in both
+fields with the original FHE constants and 128 sampling queries. Four isolated
+setups instantiate 88 owners and verify eight decoded openings. Retained and
+transient policies have exact native parameter/table/root/proof/transcript
+fingerprints. After-setup RSS falls from 9.10 to 3.48 GiB for BabyBear and from
+12.54 to 5.34 GiB for Goldilocks; opening round trips cost more. See
+`native-masked-key-setup-profile.md`. This closes native-key setup resource
+measurement only. Complete original-size masked PBS, full security/hiding,
+aggregation, security-matched performance and review gates remain open.
+
 Eight isolated 128-query synthetic openings now measure transient caches at the
 original native key-source dimensions. After-commit RSS drops by about 384 MiB
 per owner in both fields, with exact proof/root/transcript fingerprints across
 both cache policies and repetitions. Single-source peak RSS is unchanged and
 regeneration increases proving time. See `native-source-cache-profile.md`.
-Original-size masked native-key setup and complete PBS remain unmeasured.
+Original-size masked native-key setup is now measured separately; complete
+original-size masked PBS remains unmeasured.
 
 Masked source owners now support an opt-in transient encoded-codeword cache.
 It regenerates the identical oracle once per batch and releases it afterward,
