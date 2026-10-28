@@ -7,6 +7,11 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Masked opening preflight now reads data and mask lanes directly from the retained
+paired source, removing full split buffers and their input clones. Proof and
+budget semantics are unchanged. See `masked-borrowed-preflight.md`; the original
+security and complete-PBS performance gates remain open.
+
 Packed coefficient folds now use two matrix-vector products per coefficient
 pair instead of three, preserving the original verifier equation and matrix
 order. See `packed-fold-products.md` for tests and component timing. This does

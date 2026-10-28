@@ -226,6 +226,42 @@ fn response<F: Field>(
     }
     Ok(polynomial.evaluate(F::zero()))
 }
+// Fold the selected half of each paired source cell without first materializing
+// or cloning its complete polynomial. The retained source remains immutable.
+fn lane_response<F: Field>(
+    source: &Polynomial<F>,
+    width: usize,
+    offset: usize,
+    query: &[MatrixPair<F>],
+) -> Result<Vec<F>, Error> {
+    let (first, rest) = query.split_first().ok_or(Error("masked response fold"))?;
+    first
+        .validate(width)
+        .map_err(|_| Error("masked response fold"))?;
+    let mut coefficients = vec![F::zero(); source.coefficients.len() / 4];
+    let mut sum = vec![F::zero(); width];
+    for (input, out) in source
+        .coefficients
+        .chunks_exact(4 * width)
+        .zip(coefficients.chunks_exact_mut(width))
+    {
+        let even = &input[offset..offset + width];
+        let odd = &input[2 * width + offset..3 * width + offset];
+        for ((sum, &even), &odd) in sum.iter_mut().zip(even).zip(odd) {
+            *sum = even + odd;
+        }
+        first.zero.add_mul(even, out);
+        first.one.add_mul(&sum, out);
+    }
+    response(
+        Polynomial {
+            width,
+            coefficients,
+        },
+        rest,
+    )
+}
+#[cfg(test)]
 fn split<F: Field + Serialize, H: Hash + Send + Sync>(
     pp: &Parameters<F>,
     session: &ProverSession<F, H>,
@@ -271,35 +307,28 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
     let query = canonical_query.as_slice();
     let claim = canonical_claim.as_slice();
     let padded = padded_query(pp, query, claim)?;
-    let (data, mask) = split(pp, session);
-    let data_claim = response(
-        Polynomial {
-            width: pp.width,
-            coefficients: data.coefficients.clone(),
-        },
-        &padded,
-    )?;
+    let data_claim = lane_response(&session.source.polynomial, pp.width, 0, &padded)?;
     if data_claim != claim {
         return Err(Error("false masked source claim"));
     }
-    let mask_claim = response(
-        Polynomial {
-            width: pp.width,
-            coefficients: mask.coefficients.clone(),
-        },
-        &padded,
-    )?;
+    let mask_claim = lane_response(&session.source.polynomial, pp.width, pp.width, &padded)?;
     let mask_claim: Vec<_> = mask_claim.into_iter().map(Field::canonicalized).collect();
     let index = session.spent;
     session.spent += 1;
     let alpha = bind(t, pp, &session.root(), index, query, claim, &mask_claim);
     let (source_proximity, source_pairs) = source_prove::<F, H>(t, pp, &session.source, index)?;
     let identifier = identifier::<F, H>(pp, &session.root(), index, alpha);
-    let coefficients = data
+    let coefficients = session
+        .source
+        .polynomial
         .coefficients
-        .iter()
-        .zip(&mask.coefficients)
-        .map(|(&p, &s)| (p + alpha * s).canonicalized())
+        .chunks_exact(2 * pp.width)
+        .flat_map(|cell| {
+            cell[..pp.width]
+                .iter()
+                .zip(&cell[pp.width..])
+                .map(|(&p, &s)| (p + alpha * s).canonicalized())
+        })
         .collect();
     let polynomial = Polynomial {
         width: pp.width,
@@ -1216,6 +1245,22 @@ mod tests {
             })
             .collect();
         let claim = table.evaluate(&query).unwrap();
+        // Compare the borrowed first fold against the independently split source
+        // for both data and random full-extension mask lanes.
+        let padded = padded_query(&generic, &query, &claim).unwrap();
+        let before = a.source.polynomial.coefficients.clone();
+        let (data, mask) = split(&generic, &a);
+        assert_eq!(
+            lane_response(&a.source.polynomial, 2, 0, &padded).unwrap(),
+            response(data, &padded).unwrap()
+        );
+        assert_eq!(
+            lane_response(&a.source.polynomial, 2, 2, &padded).unwrap(),
+            response(mask, &padded).unwrap()
+        );
+        assert_eq!(a.source.polynomial.coefficients, before);
+        assert_eq!(a.spent(), 0);
+
         for opening in 1..=2 {
             let mut ta = Transcript::new_direct_extension::<B>();
             let mut tb = Transcript::new_direct_extension::<B>();
