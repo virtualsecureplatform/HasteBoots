@@ -22,8 +22,14 @@ FRI, with strict original-to-virtual authentication and the original per-query
 allowances. Six decoded 1/4/16-query batches verify; 16-query packets are about
 32% smaller than the prior joint-source format. All 70 core tests, repeated
 component fingerprints and both base-field adapter tests pass. See
-`masked-query-fri.md`. Canonical backend/PBS integration, native batch memory,
-new-schedule hiding/security and the original full-plan gates remain open.
+`masked-query-fri.md`. A distinct trusted canonical aggregated backend now also
+passes all four small complete v10/v11 PBS cases. Native roots and fixture/FHE
+geometry match the previous joint backend, while all backend domains and trusted
+contexts remain disjoint. Proof bytes fall 11.3–14.2%; seven context/adapter
+checks and the workspace all-target check pass. See
+`canonical-aggregated-backend.md`. Native batch memory, new-schedule
+hiding/security, original-size validation and the original full-plan gates
+remain open; concurrent timings are not a performance claim.
 
 A non-hiding joint-query proximity kernel now shares one rolling-FRI certificate
 across 1/4/16 ordered matrix-query ladders on the same source. All 65 release
