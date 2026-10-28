@@ -606,6 +606,7 @@ where
     const EXTENSION: bool = false;
     const DEFERRED: bool = false;
     const SHARED: bool = false;
+    const BATCHED: bool = false;
     fn bind_domain(_trans: &mut Transcript<F>) {}
     fn comparison_packets(limbs: usize) -> usize {
         limbs

@@ -35,6 +35,8 @@ pub const AGGREGATED_PROTOCOL_VERSION: u32 = 4;
 pub const DEFERRED_PROTOCOL_VERSION:u32=5;
 /// Complete shared-query comparison protocol, opt-in and non-hiding.
 pub const SHARED_PROTOCOL_VERSION:u32=8;
+/// Complete batch/member format with mandatory outer comparison proofs.
+pub const COMPARISON_BATCH_PROTOCOL_VERSION:u32=9;
 /// Full-extension shared sum/identity comparisons and canonical authentication.
 pub const SHARED_TRANSCRIPT_ID:&str="merlin-direct-shared-query-comparisons-v1";
 /// Direct extension lookup children with terminal source authentication per decomposition.
@@ -389,6 +391,9 @@ where
 struct EvaluationWitness<F,H:Hash+Send+Sync> {
     tables:Vec<PackedTable<F>>,
     states:Vec<State<F,H>>,
+    coefficients:Vec<State<F,H>>,
+    borrows:Vec<Vec<State<F,H>>>,
+    key_switch:Option<ks::ComparisonWitness<F,H>>,
 }
 
 fn prove_inner<F, H, C, B, R>(
@@ -406,7 +411,10 @@ where
     B: decomp::Backend<F, H, C>,
     R: hadamard::Backend<F,H,C>,
 {
-    let version=if R::BATCHED { BATCH_PROTOCOL_VERSION } else if B::SHARED { SHARED_PROTOCOL_VERSION } else if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
+    if B::BATCHED && (!R::BATCHED || retain.is_none()) {
+        return Err(error("comparison members require a complete retaining batch prover"));
+    }
+    let version=if B::BATCHED { COMPARISON_BATCH_PROTOCOL_VERSION } else if R::BATCHED { BATCH_PROTOCOL_VERSION } else if B::SHARED { SHARED_PROTOCOL_VERSION } else if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
     let timer = Instant::now();
     let cfg = &setup.verifier.config;
     pp.validate(cfg)?;
@@ -487,18 +495,22 @@ where
     let timer = Instant::now();
     let config = cfg.decomposition::<F>()?;
     let mut decomposition = Vec::with_capacity(2);
+    let mut comparison_borrows = Vec::new();
     for half in 0..2 {
+        let mut borrow_owner = None;
         decomposition.push(
-            decomp::prove_impl::<F, H, C, B>(
+            decomp::prove_retained::<F, H, C, B>(
                 &mut trans,
                 &config,
                 &input[half],
                 Some(pp.helper),
                 &co[half * d..(half + 1) * d].iter().collect::<Vec<_>>(),
                 &mut crate::packed_lane_lookup::ProverStatistics::default(),
+                if B::BATCHED {Some(&mut borrow_owner)} else {None},
             )
             .map_err(convert)?,
         );
+        if B::BATCHED { comparison_borrows.push(borrow_owner.ok_or_else(||error("missing blind-rotation comparison owner"))?); }
     }
     stats.decomposition += timer.elapsed();
     let timer = Instant::now();
@@ -525,7 +537,8 @@ where
     stats.monomial += timer.elapsed();
     let timer = Instant::now();
     let coefficients_ks = ks::from_native(width, &trace.key_switching_trace).map_err(convert)?;
-    let key_switch = ks::prove_impl::<F, H, C, B>(
+    let mut key_switch_owner = None;
+    let key_switch = ks::prove_retained::<F, H, C, B>(
         &mut trans,
         pp.final_source,
         pp.final_helper,
@@ -534,11 +547,16 @@ where
         statement.output_a,
         statement.output_b,
         &coefficients_ks,
+        if B::BATCHED {Some(&mut key_switch_owner)} else {None},
     )
     .map_err(convert)?;
     stats.key_switch += timer.elapsed();
     if let Some(sink)=retain {
-        *sink=Some(EvaluationWitness {tables:evaluation_tables,states:ev_states});
+        *sink=Some(EvaluationWitness {
+            tables:if B::BATCHED {Vec::new()} else {evaluation_tables},
+            states:ev_states, coefficients:if B::BATCHED {co_states} else {Vec::new()},
+            borrows:comparison_borrows, key_switch:key_switch_owner,
+        });
     }
     Ok(Proof {
         protocol_version: version,
@@ -628,7 +646,8 @@ where
     B: decomp::Backend<F, H, C>,
     R: hadamard::Backend<F,H,C>,
 {
-    let version=if R::BATCHED { BATCH_PROTOCOL_VERSION } else if B::SHARED { SHARED_PROTOCOL_VERSION } else if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
+    if B::BATCHED && !R::BATCHED {return Err(error("comparison members require the complete batch verifier"));}
+    let version=if B::BATCHED { COMPARISON_BATCH_PROTOCOL_VERSION } else if R::BATCHED { BATCH_PROTOCOL_VERSION } else if B::SHARED { SHARED_PROTOCOL_VERSION } else if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
     if proof.protocol_version
         != version
     {
@@ -798,6 +817,7 @@ where
             PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS v2".as_slice(),
             EXTENSION_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS extension comparisons v3".as_slice(),
             BATCH_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS joint batch member v6".as_slice(),
+            COMPARISON_BATCH_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS joint comparison batch member v9".as_slice(),
             SHARED_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS shared-query comparisons v8".as_slice(),
             DEFERRED_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS deferred lookup sources v5".as_slice(),
             AGGREGATED_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS aggregated Hadamard v4".as_slice(),

@@ -10,6 +10,8 @@ pub const TRANSCRIPT_ID:&str="merlin-direct-joint-hadamard-pbs-batch-v1";
 
 /// Canonical-source joint authentication in a separate outer protocol.
 pub mod canonical;
+/// Joint Hadamard and comparison authentication across complete statements.
+pub mod shared;
 use relation::batch as relations;
 const OUTER_VERSION: u32 = BATCH_PROTOCOL_VERSION;
 const DOMAIN: &[u8] = b"HasteBoots complete binary NAND PBS joint Hadamard batch v6";

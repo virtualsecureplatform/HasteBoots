@@ -27,6 +27,7 @@ where
 {
     type Proof = ();
     const EXTENSION: bool = true;
+    const BATCHED: bool = true;
     fn bind_domain(trans: &mut Transcript<F>) {
         trans.append_message(b"canonical decomposition batch member v1", &());
     }
@@ -133,7 +134,7 @@ where
     );
     Ok(())
 }
-fn requests<F: PrimeField>(configs: &[Config]) -> Result<Vec<lookup::Request<F>>, Error> {
+pub(crate) fn requests<F: PrimeField>(configs: &[Config]) -> Result<Vec<lookup::Request<F>>, Error> {
     let mut offset = 0;
     let mut all = Vec::new();
     for config in configs {
