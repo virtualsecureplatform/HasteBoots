@@ -7,7 +7,9 @@
 //! the SAME commitments used by other relations; no unlinked witness view is
 //! introduced. Forward and inverse NTT relations both use coefficient/NTT roles.
 
-use crate::packed_oracle::{ProverOracle, VerifierOracle};
+use crate::packed_oracle::{
+    CanonicalProverOracle, CanonicalVerifierOracle, ProverOracle, VerifierOracle,
+};
 use algebra::{
     NTTField,
     matrix_weighted::{Matrix, MatrixPair, PackedTable},
@@ -15,7 +17,7 @@ use algebra::{
 };
 use helper::{FiatShamirTranscript, Transcript};
 use pcs::{
-    matrix_weighted::{BatchOpening, Parameters},
+    matrix_weighted::{BatchOpening, Parameters, backend::CanonicalPcs},
     utils::{code::RowCode, hash::Hash},
 };
 use rayon::prelude::*;
@@ -42,13 +44,29 @@ impl Shape {
         parameters: &Parameters<C>,
         polynomial_size: usize,
     ) -> Result<Self, Error> {
-        let width = parameters.width();
+        Self::from_dimensions::<F>(parameters.num_vars(), parameters.width(), polynomial_size)
+    }
+    /// Construct the same logical NTT shape for a trusted canonical PCS backend.
+    pub fn new_canonical<F, H, P>(parameters: &P, polynomial_size: usize) -> Result<Self, Error>
+    where
+        F: NTTField + Serialize,
+        H: Hash + Send + Sync,
+        P: CanonicalPcs<F, H>,
+    {
+        Self::from_dimensions::<F>(parameters.num_vars(), parameters.width(), polynomial_size)
+    }
+    fn from_dimensions<F: NTTField>(
+        num_vars: usize,
+        width: usize,
+        polynomial_size: usize,
+    ) -> Result<Self, Error> {
         if !width.is_power_of_two() || !polynomial_size.is_power_of_two() || width > polynomial_size
         {
             return Err(error("invalid NTT polynomial size or packing width"));
         }
-        let length = (1usize << parameters.num_vars())
-            .checked_mul(width)
+        let length = 1usize
+            .checked_shl(u32::try_from(num_vars).map_err(|_| error("table dimension overflow"))?)
+            .and_then(|n| n.checked_mul(width))
             .ok_or_else(|| error("table size overflow"))?;
         if length < polynomial_size || length % polynomial_size != 0 {
             return Err(error("NTT size does not divide the canonical table"));
@@ -82,13 +100,13 @@ impl Shape {
         (self.polynomial_size / self.width).ilog2() as usize
     }
 
-    fn validate<C>(&self, parameters: &Parameters<C>) -> Result<(), Error> {
-        if parameters.width() != self.width
+    fn validate(&self, num_vars: usize, width: usize) -> Result<(), Error> {
+        if width != self.width
             || !self.width.is_power_of_two()
             || !self.polynomial_size.is_power_of_two()
             || self.polynomial_size < self.width
             || !self.num_polynomials.is_power_of_two()
-            || parameters.num_vars() != self.coefficient_variables() + self.row_variables()
+            || num_vars != self.coefficient_variables() + self.row_variables()
         {
             return Err(error("canonical oracle does not match NTT shape"));
         }
@@ -98,17 +116,19 @@ impl Shape {
 
 /// Complete NTT component proof, with no private source tables in the verifier.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Proof<F, O> {
+pub struct CanonicalProof<F, P> {
     /// k folded coefficient vectors, each of length N.
     pub coefficients: Vec<Vec<F>>,
     /// k folded NTT vectors, each of length N, in the native bit-reversed order.
     pub evaluations: Vec<Vec<F>>,
     /// Authenticate the folded coefficients against their canonical source.
-    pub coefficient_opening: BatchOpening<F, O>,
+    pub coefficient_opening: P,
     /// Authenticate the folded evaluations against their canonical source.
-    pub evaluation_opening: BatchOpening<F, O>,
+    pub evaluation_opening: P,
 }
 
+/// Legacy Brakedown packet spelling and wire layout.
+pub type Proof<F, O> = CanonicalProof<F, BatchOpening<F, O>>;
 /// Prove that every canonical polynomial block satisfies evaluation = NTT(coefficients).
 pub fn prove<F, H, C>(
     trans: &mut Transcript<F>,
@@ -121,23 +141,74 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
-    bind::<F, H, C>(
+    prove_inner::<F, H, Parameters<C>>(
         trans,
         shape,
         &coefficients.verifier(),
+        coefficients.state,
+        coefficients.table,
         &evaluations.verifier(),
-    )?;
-    for oracle in [coefficients, evaluations] {
-        oracle.table.validate().map_err(convert)?;
-        if oracle.table.width() != shape.width
-            || oracle.table.num_vars() != oracle.parameters.num_vars()
-        {
+        evaluations.state,
+        evaluations.table,
+    )
+}
+/// Prove the transform against the actual retained tables of a canonical backend.
+pub fn prove_canonical<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &Shape,
+    coefficients: &CanonicalProverOracle<'_, F, H, P>,
+    evaluations: &CanonicalProverOracle<'_, F, H, P>,
+) -> Result<CanonicalProof<F, P::BatchProof>, Error>
+where
+    F: NTTField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    prove_inner::<F, H, P>(
+        trans,
+        shape,
+        &coefficients.verifier(),
+        coefficients.state,
+        coefficients.table(),
+        &evaluations.verifier(),
+        evaluations.state,
+        evaluations.table(),
+    )
+}
+fn prove_inner<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &Shape,
+    coefficients: &CanonicalVerifierOracle<'_, H::Output, P>,
+    coefficient_state: &P::State,
+    coefficient_table: &PackedTable<F>,
+    evaluations: &CanonicalVerifierOracle<'_, H::Output, P>,
+    evaluation_state: &P::State,
+    evaluation_table: &PackedTable<F>,
+) -> Result<CanonicalProof<F, P::BatchProof>, Error>
+where
+    F: NTTField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    bind::<F, H, P>(trans, shape, coefficients, evaluations)?;
+    for (oracle, table) in [
+        (coefficients, coefficient_table),
+        (evaluations, evaluation_table),
+    ] {
+        table.validate().map_err(convert)?;
+        if table.width() != shape.width || table.num_vars() != oracle.parameters.num_vars() {
             return Err(error("source table shape mismatch"));
         }
     }
     let points = row_points(trans, shape);
-    let folded_coefficients = fold_rows(shape, coefficients.table, &points);
-    let folded_evaluations = fold_rows(shape, evaluations.table, &points);
+    let folded_coefficients: Vec<_> = fold_rows(shape, coefficient_table, &points)
+        .into_iter()
+        .map(|v| coefficients.parameters.normalize_values(v))
+        .collect();
+    let folded_evaluations: Vec<_> = fold_rows(shape, evaluation_table, &points)
+        .into_iter()
+        .map(|v| evaluations.parameters.normalize_values(v))
+        .collect();
     trans.append_message(
         b"packed NTT folded polynomials",
         &(&folded_coefficients, &folded_evaluations),
@@ -158,25 +229,25 @@ where
         .collect::<Result<Vec<_>, _>>()?;
     let coefficient_opening = coefficients
         .parameters
-        .open_many::<F, H>(
+        .open_many(
             trans,
             coefficients.commitment,
-            coefficients.state,
+            coefficient_state,
             &queries,
             &coefficient_values,
         )
         .map_err(convert)?;
     let evaluation_opening = evaluations
         .parameters
-        .open_many::<F, H>(
+        .open_many(
             trans,
             evaluations.commitment,
-            evaluations.state,
+            evaluation_state,
             &queries,
             &evaluation_values,
         )
         .map_err(convert)?;
-    Ok(Proof {
+    Ok(CanonicalProof {
         coefficients: folded_coefficients,
         evaluations: folded_evaluations,
         coefficient_opening,
@@ -197,7 +268,34 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
-    bind::<F, H, C>(trans, shape, coefficients, evaluations)?;
+    verify_canonical::<F, H, Parameters<C>>(trans, shape, coefficients, evaluations, proof)
+}
+/// Verify local transforms and every caller-root opening through a canonical PCS.
+pub fn verify_canonical<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &Shape,
+    coefficients: &CanonicalVerifierOracle<'_, H::Output, P>,
+    evaluations: &CanonicalVerifierOracle<'_, H::Output, P>,
+    proof: &CanonicalProof<F, P::BatchProof>,
+) -> Result<(), Error>
+where
+    F: NTTField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    bind::<F, H, P>(trans, shape, coefficients, evaluations)?;
+    for row in &proof.coefficients {
+        coefficients
+            .parameters
+            .validate_values(row)
+            .map_err(convert)?;
+    }
+    for row in &proof.evaluations {
+        evaluations
+            .parameters
+            .validate_values(row)
+            .map_err(convert)?;
+    }
     let points = row_points(trans, shape);
     trans.append_message(
         b"packed NTT folded polynomials",
@@ -221,7 +319,7 @@ where
         .collect::<Result<Vec<_>, _>>()?;
     coefficients
         .parameters
-        .verify_many::<F, H>(
+        .verify_many(
             trans,
             coefficients.commitment,
             &queries,
@@ -231,7 +329,7 @@ where
         .map_err(convert)?;
     evaluations
         .parameters
-        .verify_many::<F, H>(
+        .verify_many(
             trans,
             evaluations.commitment,
             &queries,
@@ -242,32 +340,32 @@ where
     Ok(())
 }
 
-fn bind<F, H, C>(
+fn bind<F, H, P>(
     trans: &mut Transcript<F>,
     shape: &Shape,
-    coefficients: &VerifierOracle<'_, H::Output, C>,
-    evaluations: &VerifierOracle<'_, H::Output, C>,
+    coefficients: &CanonicalVerifierOracle<'_, H::Output, P>,
+    evaluations: &CanonicalVerifierOracle<'_, H::Output, P>,
 ) -> Result<(), Error>
 where
     F: NTTField + Serialize,
     H: Hash + Send + Sync,
-    C: RowCode<F> + Serialize,
+    P: CanonicalPcs<F, H>,
 {
-    shape.validate(coefficients.parameters)?;
-    shape.validate(evaluations.parameters)?;
+    shape.validate(
+        coefficients.parameters.num_vars(),
+        coefficients.parameters.width(),
+    )?;
+    shape.validate(
+        evaluations.parameters.num_vars(),
+        evaluations.parameters.width(),
+    )?;
     let table = F::get_ntt_table(shape.polynomial_size.ilog2()).map_err(convert)?;
     let contexts = (
-        coefficients
-            .parameters
-            .context_digest::<F, H>()
-            .map_err(convert)?,
-        evaluations
-            .parameters
-            .context_digest::<F, H>()
-            .map_err(convert)?,
+        coefficients.parameters.context().map_err(convert)?,
+        evaluations.parameters.context().map_err(convert)?,
     );
     trans.append_message(
-        b"packed tensor NTT v2",
+        P::NTT_DOMAIN,
         &(
             F::MODULUS_VALUE.to_string(),
             shape,

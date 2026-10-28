@@ -22,6 +22,8 @@ pub trait CanonicalPcs<F: PrimeField, H: Hash + Send + Sync> {
     type SingleProof: Serialize;
     /// Domain binding a complete trusted linear relation before fresh queries.
     const LINEAR_DOMAIN: &'static [u8];
+    /// Domain binding ordered coefficient/evaluation roots and trusted NTT shape.
+    const NTT_DOMAIN: &'static [u8];
     /// Parameter/prover/verifier failure.
     type Error: std::fmt::Display;
     /// Registry framing, selected by the trusted backend.
@@ -108,6 +110,7 @@ where
     type BatchProof = BatchOpening<F, H::Output>;
     type SingleProof = Opening<F, H::Output>;
     const LINEAR_DOMAIN: &'static [u8] = b"packed canonical linear relations v1";
+    const NTT_DOMAIN: &'static [u8] = b"packed tensor NTT v2";
     type Error = super::Error;
     const REGISTRY_DOMAIN: &'static [u8] = b"packed deferred opening registry v1";
     const CLAIM_DOMAIN: &'static [u8] = b"packed deferred opening claim v1";
@@ -182,6 +185,7 @@ where
     type BatchProof = masked_polyfrim::Proof<EF, H::Output>;
     type SingleProof = masked_polyfrim::Proof<EF, H::Output>;
     const LINEAR_DOMAIN: &'static [u8] = b"masked packed canonical linear relations v2";
+    const NTT_DOMAIN: &'static [u8] = b"masked packed tensor NTT v2";
     type Error = masked_polyfrim::Error;
     const REGISTRY_DOMAIN: &'static [u8] = b"masked packed opening registry v2";
     const CLAIM_DOMAIN: &'static [u8] = b"masked packed opening claim v2";

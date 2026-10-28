@@ -7,6 +7,15 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Packed NTT source authentication now dispatches through the canonical backend
+boundary. Shared shape logic retains the original logical transform dimensions;
+masked physical padding cannot silently change them. Eight legacy byte/transcript
+controls and both fields' decoded masked forward/inverse-derived cases pass.
+Fresh false-transform certificates have genuine source openings and fail the
+NTT equation. All 90 selected component/complete-PBS tests and the locked
+workspace check pass, including sixty fresh full binding cases. See `canonical-packed-ntt.md`; remaining relation/setup
+boundaries and whole-proof security remain open.
+
 Canonical linear identities now dispatch through the packed backend boundary,
 with legacy Brakedown API/wire controls and a masked variant using the retained
 source sessions. Both selected fields pass decoded proofs and fresh false-identity

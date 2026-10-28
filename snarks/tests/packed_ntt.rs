@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+#[path = "support/legacy_packed_ntt_v2.rs"]
+mod legacy;
 use algebra::{
     BabyBear, Field, Goldilocks, NTTField, matrix_weighted::PackedTable,
     transformation::AbstractNTT,
@@ -67,10 +70,36 @@ fn check<F: NTTField + Serialize>() {
             &proof,
         )
         .unwrap();
+        let after = prover.get_challenge(b"after");
+        assert_eq!(after, verifier.get_challenge(b"after"));
+        let old_shape = legacy::Shape::new::<F, _>(&params, n).unwrap();
+        let mut reference = Transcript::new();
+        let previous =
+            legacy::prove::<F, Sha256, _>(&mut reference, &old_shape, &coefficients, &evaluations)
+                .unwrap();
         assert_eq!(
-            prover.get_challenge(b"after"),
-            verifier.get_challenge(b"after")
+            bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap(),
+            bincode::serde::encode_to_vec(&previous, bincode::config::standard()).unwrap()
         );
+        let mut old_verifier = Transcript::new();
+        legacy::verify::<F, Sha256, _>(
+            &mut old_verifier,
+            &old_shape,
+            &coefficients.verifier(),
+            &evaluations.verifier(),
+            &previous,
+        )
+        .unwrap();
+        assert_eq!(after, reference.get_challenge(b"after"));
+        assert_eq!(after, old_verifier.get_challenge(b"after"));
+        println!(
+            r#"HB_NTT_LEGACY_WIRE {{"prime":{},"polynomial_size":{},"polynomials":{},"width":{},"exact_bytes":true,"exact_transcript":true}}"#,
+            F::MODULUS_VALUE,
+            n,
+            count,
+            width
+        );
+
         let bytes = bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap();
         // Generic F only needs Serialize for the protocol; the concrete test
         // below also checks deserialization and malformed/tampered wire values.

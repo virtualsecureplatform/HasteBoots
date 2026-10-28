@@ -66,3 +66,8 @@ verification. The legacy Brakedown spelling remains an alias over its original
 packet shape; the masked variant enforces canonical response encodings. See
 `canonical-packed-linear.md` for the independent wire and fresh-false-identity
 checks. Other concrete PBS boundaries remain outstanding.
+
+NTT authentication now uses the same boundary with backend-specific ordered
+opening packets and a shared logical shape calculation. Eight frozen legacy
+controls and fresh masked transform checks are described in
+`canonical-packed-ntt.md`. Complete-PBS backend integration is still unfinished.
