@@ -40,3 +40,32 @@ complete 1/4/16-statement aggregation remains open. Original-size validation,
 large-batch memory improvements, robust proximity and security composition,
 whole-PBS hiding, security-matched size and latency gates, fresh full-proof
 adversarial audits for this backend, and independent review remain open.
+
+## Fresh complete-proof audit
+
+The test-only complete adversarial driver also accepts the trusted aggregated
+backend factory. Four modules (`v10_aggregated_babybear`,
+`v10_aggregated_goldilocks`, `v11_aggregated_babybear`,
+`v11_aggregated_goldilocks`) each expose a control and 17 fresh false-obligation
+cases. They reuse strict actual-root openings and child verification, construct
+and decode fresh certificates, compare the entire transcript fingerprint, and
+check the intended production rejection stage. No relaxed verifier mode or
+backend selector is carried on the wire.
+
+The initial Goldilocks v11 control passes. Full attack coverage remains pending
+until the combined run and report checker succeed. The source snapshot and raw
+logs are under `target/performance/canonical-aggregated-fresh-audit/`;
+`executed-sources.tar.gz` has SHA-256
+`0ae50f6cbf27160b97ce10e9957d7586cca754281bcd9628c580f11348928cce`.
+The zero evaluation-key fixtures and deterministic masks are algebraic test
+controls, not original-size encrypted adversarial or hiding evidence.
+
+Each field/version module can be run directly, for example:
+
+```sh
+RAYON_NUM_THREADS=8 cargo test --release --locked -p snarks --lib packed_pbs::canonical::audit::v11_aggregated_goldilocks -- --ignored --nocapture --test-threads=4
+```
+
+The complete combined log can be checked with
+`tools/check_complete_binding_audit.py --backend masked-aggregated --scope all`.
+The report checker does not independently verify cryptographic proof bytes.

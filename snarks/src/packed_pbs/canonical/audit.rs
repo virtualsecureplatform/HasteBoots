@@ -1008,6 +1008,26 @@ where
             .unwrap()
     });
 }
+fn aggregated_masked<F, EF, D>(width: usize, attack: Attack)
+where
+    F: NTTField + Serialize + DeserializeOwned,
+    EF: AbstractExtensionField<F> + Serialize + DeserializeOwned,
+    D: AuditStages<
+            F,
+            EF,
+            Sha256,
+            pcs::matrix_weighted::masked_polyfrim::aggregated::Parameters<F, EF>,
+        >,
+    D::Decomposition: Serialize + DeserializeOwned,
+    D::KeySwitch: Serialize + DeserializeOwned,
+{
+    use pcs::matrix_weighted::masked_polyfrim::aggregated::Parameters as Pp;
+    masked_backend::<F, EF, Pp<F, EF>, D>(width, attack, "masked-aggregated", |vars, budget| {
+        (vars..24)
+            .find_map(|physical| Pp::<F, EF>::new(vars, width, physical, 2, 1, budget).ok())
+            .unwrap()
+    });
+}
 macro_rules! masked_case {
     ($name:ident,$f:ty,$e:ty,$width:expr,$attack:ident) => {
         masked_case!($name, $f, $e, $width, $attack, stages::PerLimb);
@@ -1492,97 +1512,100 @@ masked_case!(
 // backend. Only this trusted test parameter type chooses joint source packets.
 macro_rules! joint_backend_cases {
     ($module:ident, $f:ty, $e:ty, $width:expr, $mode:ty) => {
+        joint_backend_cases!($module, $f, $e, $width, $mode, joint_masked);
+    };
+    ($module:ident, $f:ty, $e:ty, $width:expr, $mode:ty, $factory:ident) => {
         mod $module {
             use super::*;
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn control() {
-                joint_masked::<$f, $e, $mode>($width, Attack::Control);
+                $factory::<$f, $e, $mode>($width, Attack::Control);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn initial() {
-                joint_masked::<$f, $e, $mode>($width, Attack::Initial);
+                $factory::<$f, $e, $mode>($width, Attack::Initial);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn final_endpoint() {
-                joint_masked::<$f, $e, $mode>($width, Attack::Final);
+                $factory::<$f, $e, $mode>($width, Attack::Final);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn addition() {
-                joint_masked::<$f, $e, $mode>($width, Attack::Addition);
+                $factory::<$f, $e, $mode>($width, Attack::Addition);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn chain() {
-                joint_masked::<$f, $e, $mode>($width, Attack::Chain);
+                $factory::<$f, $e, $mode>($width, Attack::Chain);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn digit_a() {
-                joint_masked::<$f, $e, $mode>($width, Attack::DigitA);
+                $factory::<$f, $e, $mode>($width, Attack::DigitA);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn digit_b() {
-                joint_masked::<$f, $e, $mode>($width, Attack::DigitB);
+                $factory::<$f, $e, $mode>($width, Attack::DigitB);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn rotation() {
-                joint_masked::<$f, $e, $mode>($width, Attack::Rotation);
+                $factory::<$f, $e, $mode>($width, Attack::Rotation);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn extraction_a() {
-                joint_masked::<$f, $e, $mode>($width, Attack::ExtractionA);
+                $factory::<$f, $e, $mode>($width, Attack::ExtractionA);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn extraction_b() {
-                joint_masked::<$f, $e, $mode>($width, Attack::ExtractionB);
+                $factory::<$f, $e, $mode>($width, Attack::ExtractionB);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn key_product() {
-                joint_masked::<$f, $e, $mode>($width, Attack::KeyProduct);
+                $factory::<$f, $e, $mode>($width, Attack::KeyProduct);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn switch_key_product() {
-                joint_masked::<$f, $e, $mode>($width, Attack::SwitchKeyProduct);
+                $factory::<$f, $e, $mode>($width, Attack::SwitchKeyProduct);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn canonical_a() {
-                joint_masked::<$f, $e, $mode>($width, Attack::CanonicalA);
+                $factory::<$f, $e, $mode>($width, Attack::CanonicalA);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn canonical_b() {
-                joint_masked::<$f, $e, $mode>($width, Attack::CanonicalB);
+                $factory::<$f, $e, $mode>($width, Attack::CanonicalB);
             }
             #[test]
-            #[ignore = "manual full joint masked certificate audit; substantial CPU and memory"]
+            #[ignore = "manual full masked certificate audit; substantial CPU and memory"]
             fn switch_canonical() {
-                joint_masked::<$f, $e, $mode>($width, Attack::SwitchCanonical);
+                $factory::<$f, $e, $mode>($width, Attack::SwitchCanonical);
             }
             #[test]
             #[ignore = "manual fresh complete false lookup; substantial CPU and memory"]
             fn false_lookup_a() {
-                joint_masked::<$f, $e, $mode>($width, Attack::LookupA);
+                $factory::<$f, $e, $mode>($width, Attack::LookupA);
             }
             #[test]
             #[ignore = "manual fresh complete false lookup; substantial CPU and memory"]
             fn false_lookup_b() {
-                joint_masked::<$f, $e, $mode>($width, Attack::LookupB);
+                $factory::<$f, $e, $mode>($width, Attack::LookupB);
             }
             #[test]
             #[ignore = "manual fresh complete false lookup; substantial CPU and memory"]
             fn false_lookup_switch() {
-                joint_masked::<$f, $e, $mode>($width, Attack::SwitchLookup);
+                $factory::<$f, $e, $mode>($width, Attack::SwitchLookup);
             }
         }
     };
@@ -1722,4 +1745,38 @@ masked_case!(
     4,
     SwitchLookup,
     stages::Shared
+);
+
+// Distinct trusted aggregated-query backend; identical strict full-stage audit.
+joint_backend_cases!(
+    v10_aggregated_babybear,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    stages::PerLimb,
+    aggregated_masked
+);
+joint_backend_cases!(
+    v10_aggregated_goldilocks,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    stages::PerLimb,
+    aggregated_masked
+);
+joint_backend_cases!(
+    v11_aggregated_babybear,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    stages::Shared,
+    aggregated_masked
+);
+joint_backend_cases!(
+    v11_aggregated_goldilocks,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    stages::Shared,
+    aggregated_masked
 );
