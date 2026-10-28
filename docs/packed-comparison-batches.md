@@ -94,9 +94,25 @@ they are not native secure-key fixtures or false-output/key-splice attacks. No
 honest-proof transcript replay is used. Logs, validated source archives and the
 ten digest-checked case records are under `target/performance/comparison-batch-audit/`.
 
-This is an experimental non-hiding format. Remaining whole-v9 adversarial
-scenarios include false public outputs/keys and spliced accumulator endpoints.
-Reviewed whole-v9 security accounting and paired complete timing remain to be
-done. The scalar-fold build is undergoing its own exact native wire validation. Existing component
-forgery results and v8 native evidence do not close these v9 gates. Whole-proof
-Fiat–Shamir/hash security, direct packed hiding FRI and final promotion remain open.
+## Fresh normal-key statement binding audit
+
+The complete v9 suite now reconstructs twenty certificates using normally
+generated VFHE evaluation keys and genuine traces over both fields at small
+ring/LWE dimensions. Two controls verify; eighteen attacks reject: input mask,
+output body, retained output mask coefficient, blind-rotation key, switching key,
+initial/final accumulator endpoint, spliced chain and duplicated view. The tests
+rebuild every member child, canonical joint Hadamard proof and both mandatory
+comparison stages under the requested statement. Local reference verification
+checks actual-root openings and the undisputed equations before public rejection.
+Malicious members occupy first and last positions; key attacks use one member.
+These are normal-key small fixtures, not original-size adversarial measurements.
+
+All twelve selected v7/v8/v9 integration tests pass. Logs and twenty checked v9
+case records are in `target/performance/comparison-native-key-audit/`; validated
+source SHA-256 is
+`0212e38252218bd60b5d7d7b7712da083869917b1ff5fd87e3995de68f974d1e`.
+The separate zero-key helper-source audit remains relevant to reciprocal binding.
+
+This is an experimental non-hiding format. Whole-proof Fiat–Shamir/hash and
+knowledge security, direct packed hiding FRI, independent review and final
+promotion remain open. Passing adversarial fixtures does not prove those claims.

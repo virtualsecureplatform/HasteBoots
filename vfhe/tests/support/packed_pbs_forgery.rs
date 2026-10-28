@@ -1,6 +1,105 @@
+// Independent reconstruction of partial decomposition members for v9 audits.
+// The complete outer verifier must discharge every omitted comparison.
+macro_rules! audit_comparison_helpers {
+    (Comparisons,$extension:ty) => {
+        fn comparison_borrows(config:&decomp::Config,pp:&Parameters<C>,digits:&[&ProverOracle<'_,F,Sha256,C>])->Sources {
+            let d=config.num_digits::<F>().unwrap();assert_eq!(digits.len(),d);
+            let radix=config.radix().unwrap() as u128;
+            let mut p=F::MODULUS_VALUE.to_string().parse::<u128>().unwrap()-1;
+            let bounds:Vec<_>=(0..d).map(|_|{let b=p%radix;p/=radix;b}).collect();
+            let mut values=vec![vec![F::from(0usize);digits[0].table.values().len()];d+1];
+            for row in 0..config.logical_len() {
+                let mut borrow=0u128;
+                for i in 0..d {
+                    let digit=digits[i].table.values()[row].value().to_string().parse::<u128>().unwrap();
+                    assert!(digit<radix);borrow=u128::from(digit+borrow>bounds[i]);
+                    values[i+1][row]=F::from(borrow as usize);
+                }
+                assert_eq!(borrow,0);
+            }
+            Sources::new(pp,values.into_iter().map(|v|PackedTable::new(pp.num_vars(),pp.width(),v).unwrap()).collect())
+        }
+        fn comparison_member(prover:&mut Transcript<F>,reference:&mut Transcript<F>,config:&decomp::Config,
+            source:&ProverOracle<'_,F,Sha256,C>,helper:&Parameters<C>,digits:&[&ProverOracle<'_,F,Sha256,C>]) -> decomp::Proof<F,[u8;32],()> {
+            let pp=source.parameters;let d=config.num_digits::<F>().unwrap();
+            let contexts:Vec<_>=std::iter::once(source).chain(digits.iter().copied())
+                .map(|s|(s.parameters.context_digest::<F,Sha256>().unwrap(),s.commitment)).collect();
+            for t in [&mut *prover,&mut *reference] {
+                t.append_message(b"canonical decomposition batch member v1",&());
+                t.append_message(b"packed canonical radix decomposition v1",&(config,F::MODULUS_VALUE.to_string(),&contexts));
+                t.append_message(b"canonical lane decomposition v1",&helper.context_digest::<F,Sha256>().unwrap());
+            }
+            let borrows=comparison_borrows(config,pp,digits);
+            prover.append_message(b"packed decomposition borrow roots",&borrows.roots);
+            reference.append_message(b"packed decomposition borrow roots",&borrows.roots);
+            let borrow_o=borrows.oracles(pp);let mut registry=vec![source];registry.extend(digits.iter().copied());registry.extend(borrow_o.iter());
+            let mut power=F::from(1usize);let radix=F::from(config.radix().unwrap());
+            let mut terms=vec![(-F::from(1usize),0)];
+            for i in 0..d {terms.push((power,i+1));power*=radix;}
+            let relations=vec![snarks::packed_linear::Relation{terms},
+                snarks::packed_linear::Relation{terms:vec![(F::from(1usize),d+1)]},
+                snarks::packed_linear::Relation{terms:vec![(F::from(1usize),2*d+1)]}];
+            let linear=snarks::packed_linear::prove::<F,Sha256,_>(prover,&registry,&relations).unwrap();
+            snarks::packed_linear::verify::<F,Sha256,_>(reference,&registry.iter().map(|s|s.verifier()).collect::<Vec<_>>(),&relations,&linear).unwrap();
+            prover.append_message(b"decomposition batch comparison obligation",&());
+            reference.append_message(b"decomposition batch comparison obligation",&());
+            decomp::Proof{borrow_commitments:borrows.roots,linear,comparisons:vec![()]}
+        }
+        fn comparison_packets(prover:&mut Transcript<F>,reference:&mut Transcript<F>,pp:&pbs::Parameters<'_,C>,
+            members:&[pbs::batch::shared::MemberProof<F,[u8;32]>],sources:&[(&Sources,&Sources)],final_stage:bool)
+            -> Vec<snarks::packed_extension_lookup::shared::Proof<F,$extension,[u8;32]>> {
+            use snarks::packed_extension_lookup::{shared as lookup,deferred::Request};
+            let source=if final_stage {pp.final_source} else {pp.source};let helper=if final_stage {pp.final_helper} else {pp.helper};
+            let length=(1usize<<source.num_vars())*source.width();
+            let config=decomp::Config::new::<F>(if final_stage {5} else {8},length,1).unwrap();
+            let d=config.num_digits::<F>().unwrap();let count=members.len()*if final_stage {1} else {2};
+            let mut borrows=Vec::new();
+            for i in 0..count {
+                let (m,h)=if final_stage {(i,0)} else {(i/2,i%2)};
+                let co=if final_stage {sources[m].1} else {sources[m].0};let o=co.oracles(source);
+                let bo=comparison_borrows(&config,source,&o[h*d..(h+1)*d].iter().collect::<Vec<_>>());
+                assert_roots(&bo.roots,if final_stage {&members[m].key_switch.decomposition.borrow_commitments} else {&members[m].decomposition[h].borrow_commitments});
+                borrows.push(bo);
+            }
+            let mut proofs=Vec::new();
+            for start in (0..count).step_by(4) {
+                let end=(start+4).min(count);let mut registry=Vec::new();let mut requests=Vec::new();
+                for i in start..end {
+                    let (m,h)=if final_stage {(i,0)} else {(i/2,i%2)};
+                    let co=if final_stage {sources[m].1} else {sources[m].0};
+                    registry.extend(co.oracles(source).into_iter().skip(h*d).take(d));registry.extend(borrows[i].oracles(source));
+                    let offset=(i-start)*(2*d+1);
+                    for j in 0..d {requests.push(Request{config:snarks::packed_tuple_lookup::Config::new(length,config.comparison_table::<F>(j).unwrap(),1).unwrap(),
+                        source_slots:vec![offset+j,offset+d+j,offset+d+j+1]});}
+                }
+                prover.append_message(b"PBS shared lookup group",&(final_stage,start,end));reference.append_message(b"PBS shared lookup group",&(final_stage,start,end));
+                let proof=lookup::prove::<F,$extension,Sha256,_>(prover,helper,&registry.iter().collect::<Vec<_>>(),&requests).unwrap();
+                lookup::verify::<F,$extension,Sha256,_>(reference,helper,&registry.iter().map(|o|o.verifier()).collect::<Vec<_>>(),&requests,&proof).unwrap();
+                proofs.push(proof);
+            }
+            proofs
+        }
+    };
+    ($kind:ident $(,$extension:ty)?) => {};
+}
+macro_rules! audit_decomposition {
+    (Comparisons,$prove:ident,$verify:ident,$prover:expr,$reference:expr,$config:expr,$source:expr,$helper:expr,$digits:expr,$extension:ty) => {
+        comparison_member($prover,$reference,$config,$source,$helper,$digits)
+    };
+    ($kind:ident,$prove:ident,$verify:ident,$prover:expr,$reference:expr,$config:expr,$source:expr,$helper:expr,$digits:expr $(,$extension:ty)?) => {{
+        let proof=decomp::$prove::<F,$($extension,)? Sha256,_>($prover,$config,$source,$helper,$digits).unwrap();
+        decomp::$verify::<F,$($extension,)? Sha256,_>($reference,$config,&($source).verifier(),$helper,&($digits).iter().map(|d|d.verifier()).collect::<Vec<_>>(),&proof).unwrap();proof
+    }};
+}
+macro_rules! audit_comparison_sources {
+    (Comparisons,$co:expr,$ks:expr,$anchor_co:expr,$anchor_ks:expr) => {($co,$ks,&$anchor_co,&$anchor_ks)};
+    ($kind:ident,$($rest:tt)*) => {()};
+}
+
 // Select the Hadamard certificate while leaving key-switch product proofs on
 // their original backend. These helpers exist only in adversarial test modules.
 macro_rules! audit_decomposition_type {
+    (Comparisons,$extension:ty) => {decomp::Proof<F,[u8;32],()>};
     (Shared,$extension:ty) => {decomp::shared::Proof<F,$extension,[u8;32]>};
     (Canonical,$extension:ty) => {audit_decomposition_type!(Joint,$extension)};
     (Joint,$extension:ty) => {decomp::deferred::Proof<F,$extension,[u8;32]>};
@@ -9,6 +108,7 @@ macro_rules! audit_decomposition_type {
     ($kind:ident,$extension:ty) => { decomp::ExtensionProof<F,$extension,[u8;32]> };
 }
 macro_rules! audit_hadamard_helpers {
+    (Comparisons,$extension:ty) => {audit_hadamard_helpers!(Joint,$extension);};
     (Shared,$extension:ty) => {audit_hadamard_helpers!(Aggregated,$extension);};
     (Canonical,$extension:ty) => {audit_hadamard_helpers!(Joint,$extension);};
     (Joint,$extension:ty) => {
@@ -56,6 +156,11 @@ macro_rules! audit_hadamard_helpers {
 // Joint fixtures obtain a checked honest member through the public batch API;
 // there is no standalone production verifier for the partial member format.
 macro_rules! audit_honest_member {
+    (Comparisons,$prove:ident,$verify:ident,$pp:expr,$setup:expr,$expected:expr,$statement:expr,$trace:expr,$extension:ty) => {{
+        let statements=[$statement.clone()];
+        let mut proof=pbs::batch::shared::prove::<F,$extension,Sha256,_>($pp,$setup,&statements,&[$trace]).unwrap();
+        pbs::batch::shared::verify::<F,$extension,Sha256,_>($pp,$expected,&statements,&proof).unwrap();proof.members.remove(0)
+    }};
     (Canonical,$prove:ident,$verify:ident,$pp:expr,$setup:expr,$expected:expr,$statement:expr,$trace:expr,$extension:ty) => {{
         let statements=[$statement.clone()];
         let mut proof=pbs::batch::canonical::prove::<F,$extension,Sha256,_>($pp,$setup,&statements,&[$trace]).unwrap();
@@ -74,6 +179,7 @@ macro_rules! audit_honest_member {
     }};
 }
 macro_rules! audit_prepare_joint_anchor {
+    (Comparisons,$($args:tt)*) => {audit_prepare_joint_anchor!(Joint,$($args)*)};
     (Canonical,$($args:tt)*) => {audit_prepare_joint_anchor!(Joint,$($args)*)};
     (Joint,$evaluations:expr,$key:expr,$count:expr) => {{
         let mut factors=Vec::new();let mut roots=Vec::new();let mut states=Vec::new();
@@ -87,8 +193,51 @@ macro_rules! audit_prepare_joint_anchor {
     ($kind:ident,$evaluations:expr,$key:expr,$count:expr) => {()};
 }
 macro_rules! audit_verify_full {
+    (Comparisons,$verify:ident,$pp:expr,$expected:expr,$statement:expr,$forged:expr,$contexts:expr,
+        $factors:expr,$actual:expr,$states:expr,$declared:expr,$anchor_statement:expr,$anchor:expr,$anchor_sources:expr,$comparison_sources:expr,$use_anchor:expr,$malicious_last:expr,$extension:ty) => {{
+        let mut statements=vec![$statement.clone()];let mut members=vec![$forged];
+        let mut actual=vec![$actual.clone()];let mut declared=vec![$declared.clone()];
+        let mut factor_slices=vec![$factors.as_slice()];let mut state_slices=vec![$states.as_slice()];
+        if $use_anchor {
+            let at=if $malicious_last {0} else {1};
+            statements.insert(at,$anchor_statement.clone());members.insert(at,$anchor.clone());
+            actual.insert(at,$anchor_sources.1.clone());declared.insert(at,$anchor_sources.1.clone());
+            factor_slices.insert(at,$anchor_sources.0.as_slice());state_slices.insert(at,$anchor_sources.2.as_slice());
+        }
+        let (co,ks,anchor_co,anchor_ks)=$comparison_sources;
+        let mut comparison_sources=vec![(co,ks)];
+        if $use_anchor {comparison_sources.insert(if $malicious_last {0} else {1},(anchor_co,anchor_ks));}
+        let comparison_roots:Vec<_>=members.iter().map(|m|(&m.coefficients,m.decomposition.iter().map(|d|&d.borrow_commitments).collect::<Vec<_>>(),&m.key_switch.coefficients,&m.key_switch.decomposition.borrow_commitments)).collect();
+        let shape=product_shape($pp.source,($factors.len()-1)/2);let shapes=vec![shape;members.len()];
+        let degree=<$extension as algebra::AbstractExtensionField<F>>::D;
+        let start=|| {
+            let mut t=Transcript::new_direct();
+            t.append_message(b"HasteBoots complete binary NAND PBS joint comparison batch v9",
+                &(9u32,4usize,degree,$expected,$contexts,&statements,&declared,&comparison_roots));
+            t.append_message(b"HasteBoots canonical-source shared-challenge packed relations v1",
+                &(&shapes,$pp.source.context_digest::<F,Sha256>().unwrap(),degree,&declared));t
+        };
+        let mut prover=start();let mut reference=start();
+        let (zero,claims,values)=packed_zero::batch::prove(&mut prover,&shapes,&factor_slices).unwrap();
+        let checked=packed_zero::batch::verify(&mut reference,&shapes,&zero).unwrap();
+        for ((shape,claim),values) in shapes.iter().zip(&checked).zip(&values) {claim.check(shape,values).unwrap();}
+        prover.append_message(b"packed batch relation terminal values",&values);
+        reference.append_message(b"packed batch relation terminal values",&values);
+        let actual:Vec<_>=actual.iter().flatten().cloned().collect();
+        let states:Vec<_>=state_slices.iter().flat_map(|s|s.iter().copied()).collect();
+        let flat_values:Vec<_>=values.iter().flatten().cloned().collect();
+        let opening=pcs::matrix_weighted::aggregate::canonical::prove::<F,$extension,Sha256,_>($pp.source,&mut prover,&actual,&states,&claims[0].query,&flat_values).unwrap();
+        pcs::matrix_weighted::aggregate::canonical::verify::<F,$extension,Sha256,_>($pp.source,&mut reference,&actual,&checked[0].query,&flat_values,&opening).unwrap();
+        let blind_rotation=comparison_packets(&mut prover,&mut reference,$pp,&members,&comparison_sources,false);
+        let key_switch=comparison_packets(&mut prover,&mut reference,$pp,&members,&comparison_sources,true);
+        assert_eq!(prover.get_challenge(b"after genuine joint forgery"),reference.get_challenge(b"after genuine joint forgery"));
+        let proof=pbs::batch::shared::Proof {protocol_version:9u32,members,hadamard:relation::batch::canonical::Proof {zero,values,opening},blind_rotation,key_switch};
+        let bytes=bincode::serde::encode_to_vec(&proof,bincode::config::standard()).unwrap();
+        let (proof,used):(pbs::batch::shared::Proof<F,$extension,[u8;32]>,_)=bincode::serde::decode_from_slice(&bytes,bincode::config::standard()).unwrap();assert_eq!(used,bytes.len());
+        pbs::batch::shared::verify::<F,$extension,Sha256,_>($pp,$expected,&statements,&proof)
+    }};
     (Canonical,$verify:ident,$pp:expr,$expected:expr,$statement:expr,$forged:expr,$contexts:expr,
-        $factors:expr,$actual:expr,$states:expr,$declared:expr,$anchor_statement:expr,$anchor:expr,$anchor_sources:expr,$use_anchor:expr,$malicious_last:expr,$extension:ty) => {{
+        $factors:expr,$actual:expr,$states:expr,$declared:expr,$anchor_statement:expr,$anchor:expr,$anchor_sources:expr,$comparison_sources:expr,$use_anchor:expr,$malicious_last:expr,$extension:ty) => {{
         let mut statements=vec![$statement.clone()];let mut members=vec![$forged];
         let mut actual=vec![$actual.clone()];let mut declared=vec![$declared.clone()];
         let mut factor_slices=vec![$factors.as_slice()];let mut state_slices=vec![$states.as_slice()];
@@ -125,7 +274,7 @@ macro_rules! audit_verify_full {
         pbs::batch::canonical::verify::<F,$extension,Sha256,_>($pp,$expected,&statements,&proof)
     }};
     (Joint,$verify:ident,$pp:expr,$expected:expr,$statement:expr,$forged:expr,$contexts:expr,
-        $factors:expr,$actual:expr,$states:expr,$declared:expr,$anchor_statement:expr,$anchor:expr,$anchor_sources:expr,$use_anchor:expr,$malicious_last:expr,$extension:ty) => {{
+        $factors:expr,$actual:expr,$states:expr,$declared:expr,$anchor_statement:expr,$anchor:expr,$anchor_sources:expr,$comparison_sources:expr,$use_anchor:expr,$malicious_last:expr,$extension:ty) => {{
         let mut statements=vec![$statement.clone()];let mut members=vec![$forged];
         let mut actual=vec![$actual.clone()];let mut declared=vec![$declared.clone()];
         let mut factor_slices=vec![$factors.as_slice()];let mut state_slices=vec![$states.as_slice()];
@@ -162,16 +311,21 @@ macro_rules! audit_verify_full {
         pbs::batch::verify::<F,$extension,Sha256,_>($pp,$expected,&statements,&proof)
     }};
     ($kind:ident,$verify:ident,$pp:expr,$expected:expr,$statement:expr,$forged:expr,$contexts:expr,
-        $factors:expr,$actual:expr,$states:expr,$declared:expr,$anchor_statement:expr,$anchor:expr,$anchor_sources:expr,$use_anchor:expr,$malicious_last:expr $(,$extension:ty)?) => {
+        $factors:expr,$actual:expr,$states:expr,$declared:expr,$anchor_statement:expr,$anchor:expr,$anchor_sources:expr,$comparison_sources:expr,$use_anchor:expr,$malicious_last:expr $(,$extension:ty)?) => {
         pbs::$verify::<F,$($extension,)? Sha256,_>($pp,$expected,$statement,&$forged)
     };
 }
 // Report the enclosing certificate version, not the partial member version.
 macro_rules! audit_outer_version {
+    (Comparisons,$member:expr) => {9u32};
     (Canonical,$member:expr) => {7u32};
     ($kind:ident,$member:expr) => {$member};
 }
 macro_rules! audit_joint_case_scope {
+    (Comparisons,$attack:expr,$accepted:expr,$use_anchor:expr,$malicious_last:expr) => {
+        let members=if $use_anchor {2} else {1};let malicious_index=usize::from($use_anchor && $malicious_last);
+        eprintln!("HB_JOINT_BINDING_CASE {{\"protocol_version\":9,\"prime\":{},\"attack\":\"{:?}\",\"members\":{members},\"malicious_index\":{malicious_index},\"reference_scope\":\"fresh-complete-members-canonical-hadamard-comparisons-actual-root-openings\",\"production_accepted\":{}}}",F::MODULUS_VALUE,$attack,$accepted);
+    };
     (Canonical,$attack:expr,$accepted:expr,$use_anchor:expr,$malicious_last:expr) => {
         let members=if $use_anchor {2} else {1};let malicious_index=usize::from($use_anchor && $malicious_last);
         eprintln!("HB_JOINT_BINDING_CASE {{\"protocol_version\":7,\"prime\":{},\"attack\":\"{:?}\",\"members\":{members},\"malicious_index\":{malicious_index},\"reference_scope\":\"fresh-member-children-and-canonical-actual-root-openings\",\"production_accepted\":{}}}",F::MODULUS_VALUE,$attack,$accepted);
@@ -196,6 +350,10 @@ macro_rules! complete_foreign_trace_case {
     };
     (@deferred $module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr, $extension:ty) => {
         complete_foreign_trace_case!(@backend Deferred,$module,$field,$prove,$verify,$pbs_prove,$pbs_verify,$version,$domain,$width,$repetitions,$extension);
+    };
+    (@comparisons $module:ident,$field:ty,$extension:ty,$width:expr) => {
+        complete_foreign_trace_case!(@backend Comparisons,$module,$field,prove_deferred,verify_deferred,prove_deferred,verify_deferred,
+            pbs::COMPARISON_BATCH_PROTOCOL_VERSION,b"HasteBoots complete binary NAND PBS joint comparison batch member v9",$width,1,$extension);
     };
     (@canonical $module:ident,$field:ty,$extension:ty,$width:expr) => {
         complete_foreign_trace_case!(@backend Canonical,$module,$field,prove_deferred,verify_deferred,prove_deferred,verify_deferred,
@@ -261,6 +419,7 @@ macro_rules! complete_foreign_trace_case {
                         .collect()
                 }
             }
+            audit_comparison_helpers!($kind $(,$extension)?);
             fn transforms(tables: &[PackedTable<F>], n: usize) -> Vec<PackedTable<F>> {
                 let native = F::get_ntt_table(n.ilog2()).unwrap();
                 tables
@@ -563,23 +722,7 @@ macro_rules! complete_foreign_trace_case {
                 );
                 let config = decomp::Config::new::<F>(5, 2 * n, $repetitions).unwrap();
                 let digits = co_o[..d].iter().collect::<Vec<_>>();
-                let decomposition = decomp::$prove::<F, $($extension,)? Sha256, _>(
-                    prover,
-                    &config,
-                    &in_o[0],
-                    pp.final_helper,
-                    &digits,
-                )
-                .unwrap();
-                decomp::$verify::<F, $($extension,)? Sha256, _>(
-                    reference,
-                    &config,
-                    &in_o[0].verifier(),
-                    pp.final_helper,
-                    &digits.iter().map(|s| s.verifier()).collect::<Vec<_>>(),
-                    &decomposition,
-                )
-                .unwrap();
+                let decomposition=audit_decomposition!($kind,$prove,$verify,prover,reference,&config,&in_o[0],pp.final_helper,&digits $(,$extension)?);
                 let mut mask = vec![F::from(0usize); 2 * n];
                 let mut target = mask.clone();
                 mask[0] = F::from(1usize);
@@ -1135,23 +1278,7 @@ macro_rules! complete_foreign_trace_case {
                     let mut decomposition = Vec::new();
                     for half in 0..2 {
                         let digits = co_o[half * d..(half + 1) * d].iter().collect::<Vec<_>>();
-                        let proof = decomp::$prove::<F, $($extension,)? Sha256, _>(
-                            &mut prover,
-                            &config,
-                            &in_o[half],
-                            pp.helper,
-                            &digits,
-                        )
-                        .unwrap();
-                        decomp::$verify::<F, $($extension,)? Sha256, _>(
-                            &mut reference,
-                            &config,
-                            &in_o[half].verifier(),
-                            pp.helper,
-                            &digits.iter().map(|d| d.verifier()).collect::<Vec<_>>(),
-                            &proof,
-                        )
-                        .unwrap();
+                        let proof=audit_decomposition!($kind,$prove,$verify,&mut prover,&mut reference,&config,&in_o[half],pp.helper,&digits $(,$extension)?);
                         decomposition.push(proof);
                     }
                     let acc_shape = acc::Shape::new(n, lwe).unwrap();
@@ -1313,7 +1440,7 @@ macro_rules! complete_foreign_trace_case {
                         bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
                     assert_eq!(used, bytes.len());
                     let result=audit_verify_full!($kind,$pbs_verify,&pp,expected,statement,forged,&contexts,
-                        _joint_hadamard_factors,roots,states,declared,&alternate_statement,&alternate_honest,_joint_anchor,
+                        _joint_hadamard_factors,roots,states,declared,&alternate_statement,&alternate_honest,_joint_anchor,audit_comparison_sources!($kind,co,ks_co,alternate_co,alternate_ks_co),
                         !matches!(attack,Attack::BlindKey|Attack::SwitchKey),
                         matches!(attack,Attack::InputMask|Attack::OutputBody|Attack::OutputA|Attack::FinalEndpoint)
                         $(,$extension)?);
