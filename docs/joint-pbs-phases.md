@@ -64,3 +64,31 @@ occupies about 6.2 seconds per proof. That observation motivates parallelizing
 independent scalar round messages; this experiment uses the earlier sequential
 message build, not the new parallel implementation. No speedup for the parallel
 build is inferred from these measurements.
+
+## Parallel scalar messages: complete native timing
+
+`target/performance/parallel-pbs-timing/` completes sixteen decoded, publicly
+verified single-PBS proofs in eight serial processes. Each field uses the same
+frozen binary for v5 and v9, Rayon 16, original ring/LWE dimensions 1024/728,
+and two fresh statements per reused setup. Both field/mode orders are reversed
+in the second pass. The idle guards exclude builds/tests during measurement;
+phase totals, actual keys, FHE parameters, layouts and fresh statements match
+the native reference. Complete time includes trace, proof and serialization;
+setup and verification are separate. Medians in seconds:
+
+| Field | Order | Complete v5 | Parallel v9 | Improvement |
+| --- | --- | ---: | ---: | ---: |
+| BabyBear sextic | 0 | 18.2505 | 11.7822 | 35.44% |
+| BabyBear sextic | 1 | 18.2378 | 11.6256 | 36.26% |
+| Goldilocks cubic | 0 | 31.7780 | 23.9508 | 24.63% |
+| Goldilocks cubic | 1 | 32.0343 | 24.1652 | 24.56% |
+
+Both orders exceed the engineering 10% threshold. The measured profiles remain
+conditional interactive profiles: `whole_security_matched` is false. These results
+do not close the original whole-proof 128-bit, hiding or fully security-matched
+latency/size promotion gates. Frozen build sources are in
+`parallel-scalar-messages/build-sources.tar.gz` (SHA-256
+`3bf9b9b775207e098fc72cd2540f6af34ccf0e5e99fea3b0690ae86598319897`).
+Native 1/4/16 exact-wire validation is separately complete under
+`parallel-scalar-native/`; its correctness-run elapsed times are not paired
+performance evidence.

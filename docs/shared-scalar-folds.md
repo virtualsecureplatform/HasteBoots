@@ -61,7 +61,15 @@ They include cubic products, cancelling terms, affine wrappers and distinct sour
 objects with equal values. All 62 selected Rust tests pass, including fifty SNARK
 unit tests, six complete v8/v9 fixtures and two bounded decomposition fixtures.
 All 210 toy wire-controlled member instances retain archived bytes/hashes across
-v5–v9. A separate original-size exact-wire run is active under
-`target/performance/parallel-scalar-native/`; its source/binary/test evidence is
-under `target/performance/parallel-scalar-messages/`. Performance is not yet
-measured for this build.
+v5–v9. All six original-size 1/4/16 certificates (42 fresh statements) verify with
+identical pre-parallel proof bytes/hashes under
+`target/performance/parallel-scalar-native/`. Goldilocks peak RSS is
+75,701,892 KiB. Source/binary/test evidence is under
+`target/performance/parallel-scalar-messages/`, with frozen build source SHA-256
+`3bf9b9b775207e098fc72cd2540f6af34ccf0e5e99fea3b0690ae86598319897`.
+
+The separate clean `parallel-pbs-timing/` experiment verifies sixteen complete
+single proofs and clears 10% in both reversed orders: BabyBear 35.44–36.26%,
+Goldilocks 24.56–24.63%. See `joint-pbs-phases.md` for complete-time medians and
+scope. This is conditional-profile engineering evidence; the original fully
+security-matched promotion gate remains open.

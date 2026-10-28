@@ -11,9 +11,12 @@ Independent scalar round messages now run in parallel over immutable arithmetic
 metadata, with ordered collection before each common challenge. Four scalar tests
 include 54 byte-exact reference certificates / 378 equations over both fields and
 1/4/16-worker pools; all 62 selected Rust tests pass. All 210 toy wire-controlled
-member instances remain exact. Original-size exact-wire validation is running
-under `target/performance/parallel-scalar-native/`; parallel performance remains
-unmeasured. See `shared-scalar-folds.md`.
+member instances remain exact. Original-size exact-wire validation now passes all six 1/4/16 certificates
+(42 fresh members), preserving every proof byte/hash under
+`target/performance/parallel-scalar-native/`. Clean repeated complete timing
+improves 35.44–36.26% on BabyBear and 24.56–24.63% on Goldilocks across
+reversed orders; all sixteen proofs verify. These conditional-profile engineering
+results do not establish fully security-matched promotion. See `shared-scalar-folds.md`.
 
 Complete-v9 phase statistics and repeated single-proof benchmarking are now
 implemented with digest-linked phase/parent checks. All 96 Python checks and two
@@ -22,6 +25,12 @@ remain exact and eight repeated single proofs verify. The clean sixteen-proof
 pooled experiment improves complete latency only 8.05–8.42% BabyBear /
 7.87–8.05% Goldilocks across reversed orders, below 10%. It measures the earlier
 sequential-message build. See `joint-pbs-phases.md`; full-security matching is open.
+
+Twenty fresh normal-key v9 certificates now cover false inputs/outputs, foreign
+evaluation keys, accumulator endpoints, chain splices and duplicated views.
+Two controls accept and eighteen attacks reject over both fields. All twelve
+selected v7/v8/v9 integration tests pass. These small fixtures supplement the
+separate helper-source audit; they are not a whole-proof security argument.
 
 Shared scalar sumcheck now borrows the first round and pools folded sources by
 immutable object identity. All four scalar-batch tests compare against independent
