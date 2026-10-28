@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+#[path = "support/legacy_packed_linear_v1.rs"]
+mod legacy;
 use algebra::{BabyBear as F, matrix_weighted::PackedTable};
 use helper::{FiatShamirTranscript, Transcript};
 use pcs::{matrix_weighted::Parameters, utils::code::BlockReedSolomonCode};
@@ -122,4 +125,73 @@ fn linear_relations_authenticate_every_source_and_trusted_coefficient() {
             .is_err()
         );
     }
+}
+
+fn compare_legacy<F: algebra::NTTField + serde::Serialize>(width: usize) {
+    let pp = Parameters::<BlockReedSolomonCode<F>>::balanced_block_rs(4, width, 32, 2).unwrap();
+    let a: Vec<_> = (0..16 * width).map(|i| F::from(i * i + 3)).collect();
+    let b: Vec<_> = a.iter().map(|&v| v * F::from(7usize)).collect();
+    let c: Vec<_> = a.iter().zip(&b).map(|(&a, &b)| a + b).collect();
+    let tables: Vec<_> = [a, b, c]
+        .into_iter()
+        .map(|v| PackedTable::new(4, width, v).unwrap())
+        .collect();
+    let (roots, states): (Vec<_>, Vec<_>) = tables
+        .iter()
+        .map(|t| pp.commit::<F, Sha256>(t).unwrap())
+        .unzip();
+    let sources: Vec<_> = tables
+        .iter()
+        .zip(&roots)
+        .zip(&states)
+        .map(|((table, commitment), state)| ProverOracle {
+            parameters: &pp,
+            commitment,
+            state,
+            table,
+        })
+        .collect();
+    let refs: Vec<_> = sources.iter().collect();
+    let relations = vec![Relation {
+        terms: vec![
+            (F::from(1usize), 0),
+            (F::from(1usize), 1),
+            (-F::from(1usize), 2),
+        ],
+    }];
+    let old_relations = vec![legacy::Relation {
+        terms: relations[0].terms.clone(),
+    }];
+    let mut current = Transcript::new_direct();
+    let mut reference = Transcript::new_direct();
+    let proof = packed_linear::prove::<F, Sha256, _>(&mut current, &refs, &relations).unwrap();
+    let old = legacy::prove::<F, Sha256, _>(&mut reference, &refs, &old_relations).unwrap();
+    let bytes = bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap();
+    assert_eq!(
+        bytes,
+        bincode::serde::encode_to_vec(&old, bincode::config::standard()).unwrap()
+    );
+    let public: Vec<_> = sources.iter().map(|s| s.verifier()).collect();
+    let mut verifier = Transcript::new_direct();
+    let mut old_verifier = Transcript::new_direct();
+    packed_linear::verify::<F, Sha256, _>(&mut verifier, &public, &relations, &proof).unwrap();
+    legacy::verify::<F, Sha256, _>(&mut old_verifier, &public, &old_relations, &old).unwrap();
+    let after = current.get_challenge(b"linear legacy after");
+    assert_eq!(after, reference.get_challenge(b"linear legacy after"));
+    assert_eq!(after, verifier.get_challenge(b"linear legacy after"));
+    assert_eq!(after, old_verifier.get_challenge(b"linear legacy after"));
+    println!(
+        r#"HB_LINEAR_LEGACY_WIRE {{"prime":{},"width":{},"proof_bytes":{},"exact_bytes":true,"exact_transcript":true}}"#,
+        F::MODULUS_VALUE,
+        width,
+        bytes.len()
+    );
+}
+#[test]
+fn babybear_linear_legacy_wire() {
+    compare_legacy::<algebra::BabyBear>(8);
+}
+#[test]
+fn goldilocks_linear_legacy_wire() {
+    compare_legacy::<algebra::Goldilocks>(4);
 }

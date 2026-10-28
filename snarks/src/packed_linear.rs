@@ -3,11 +3,13 @@
 //! All roots and trusted relation coefficients are fixed before one common
 //! ordered-matrix query. A nonzero residual table survives each fold except
 //! with probability at most ((2k-1)/p)^k; union bound over the variables.
-use crate::packed_oracle::{ProverOracle, VerifierOracle};
+use crate::packed_oracle::{
+    CanonicalProverOracle, CanonicalVerifierOracle, ProverOracle, VerifierOracle,
+};
 use algebra::{PrimeField, matrix_weighted::MatrixPair};
 use helper::{FiatShamirTranscript, Transcript};
 use pcs::{
-    matrix_weighted::Opening,
+    matrix_weighted::{Opening, Parameters, backend::CanonicalPcs},
     utils::{code::RowCode, hash::Hash},
 };
 use serde::{Deserialize, Serialize};
@@ -25,12 +27,14 @@ pub struct Relation<F> {
 }
 /// Authenticated evaluations; the verifier never receives private source tables.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Proof<F, O> {
+pub struct CanonicalProof<F, P> {
     /// One vector per canonical source at the common query.
     pub values: Vec<Vec<F>>,
     /// Openings against the expected source roots.
-    pub openings: Vec<Opening<F, O>>,
+    pub openings: Vec<P>,
 }
+/// Existing Brakedown wire spelling, retaining its single-opening packet layout.
+pub type Proof<F, O> = CanonicalProof<F, Opening<F, O>>;
 /// Prove all trusted identities using the same canonical roots and matrix query.
 pub fn prove<F, H, C>(
     trans: &mut Transcript<F>,
@@ -43,22 +47,64 @@ where
     C: RowCode<F> + Serialize,
 {
     let public: Vec<_> = sources.iter().map(|s| s.verifier()).collect();
-    let query = query::<F, H, C>(trans, &public, relations)?;
-    let values = sources
-        .iter()
-        .map(|s| s.table.evaluate(&query).map_err(convert))
-        .collect::<Result<Vec<_>, _>>()?;
+    let states: Vec<_> = sources.iter().map(|s| s.state).collect();
+    let tables: Vec<_> = sources.iter().map(|s| s.table).collect();
+    prove_inner::<F, H, Parameters<C>>(trans, &public, &states, &tables, relations)
+}
+/// Prove identities using the actual retained tables of a trusted PCS backend.
+pub fn prove_canonical<F, H, P>(
+    trans: &mut Transcript<F>,
+    sources: &[&CanonicalProverOracle<'_, F, H, P>],
+    relations: &[Relation<F>],
+) -> Result<CanonicalProof<F, P::SingleProof>, Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    let public: Vec<_> = sources.iter().map(|s| s.verifier()).collect();
+    let states: Vec<_> = sources.iter().map(|s| s.state).collect();
+    let tables: Vec<_> = sources.iter().map(|s| s.table()).collect();
+    prove_inner::<F, H, P>(trans, &public, &states, &tables, relations)
+}
+fn prove_inner<F, H, P>(
+    trans: &mut Transcript<F>,
+    sources: &[CanonicalVerifierOracle<'_, H::Output, P>],
+    states: &[&P::State],
+    tables: &[&algebra::matrix_weighted::PackedTable<F>],
+    relations: &[Relation<F>],
+) -> Result<CanonicalProof<F, P::SingleProof>, Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    let query = query::<F, H, P>(trans, sources, relations)?;
+    let mut values = Vec::with_capacity(sources.len());
+    let mut queries = Vec::with_capacity(sources.len());
+    for (source, table) in sources.iter().zip(tables) {
+        let value = table.evaluate(&query).map_err(convert)?;
+        let (q, v) = source
+            .parameters
+            .normalize_claim(query.clone(), value)
+            .map_err(convert)?;
+        queries.push(q);
+        values.push(v);
+    }
     check(&values, relations, sources[0].parameters.width())?;
     let openings = sources
         .iter()
+        .zip(states)
+        .zip(&queries)
         .zip(&values)
-        .map(|(s, v)| {
-            s.parameters
-                .open::<F, H>(trans, s.commitment, s.state, &query, v)
+        .map(|(((source, state), query), value)| {
+            source
+                .parameters
+                .open(trans, source.commitment, state, query, value)
                 .map_err(convert)
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Proof { values, openings })
+        .collect::<Result<_, _>>()?;
+    Ok(CanonicalProof { values, openings })
 }
 /// Verify all identities and all canonical source openings.
 pub fn verify<F, H, C>(
@@ -72,27 +118,49 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
-    let query = query::<F, H, C>(trans, sources, relations)?;
+    verify_canonical::<F, H, Parameters<C>>(trans, sources, relations, proof)
+}
+/// Verify trusted identities and every expected root through a canonical backend.
+pub fn verify_canonical<F, H, P>(
+    trans: &mut Transcript<F>,
+    sources: &[CanonicalVerifierOracle<'_, H::Output, P>],
+    relations: &[Relation<F>],
+    proof: &CanonicalProof<F, P::SingleProof>,
+) -> Result<(), Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    let query = query::<F, H, P>(trans, sources, relations)?;
     if proof.openings.len() != sources.len() || proof.values.len() != sources.len() {
         return Err(error("incorrect source proof count"));
     }
+    for (source, value) in sources.iter().zip(&proof.values) {
+        source.parameters.validate_values(value).map_err(convert)?;
+    }
     check(&proof.values, relations, sources[0].parameters.width())?;
-    for ((s, v), opening) in sources.iter().zip(&proof.values).zip(&proof.openings) {
-        s.parameters
-            .verify::<F, H>(trans, s.commitment, &query, v, opening)
+    for ((source, value), opening) in sources.iter().zip(&proof.values).zip(&proof.openings) {
+        let (query, value) = source
+            .parameters
+            .normalize_claim(query.clone(), value.clone())
+            .map_err(convert)?;
+        source
+            .parameters
+            .verify(trans, source.commitment, &query, &value, opening)
             .map_err(convert)?;
     }
     Ok(())
 }
-fn query<F, H, C>(
+fn query<F, H, P>(
     trans: &mut Transcript<F>,
-    sources: &[VerifierOracle<'_, H::Output, C>],
+    sources: &[CanonicalVerifierOracle<'_, H::Output, P>],
     relations: &[Relation<F>],
 ) -> Result<Vec<MatrixPair<F>>, Error>
 where
     F: PrimeField + Serialize,
     H: Hash + Send + Sync,
-    C: RowCode<F> + Serialize,
+    P: CanonicalPcs<F, H>,
 {
     if sources.is_empty()
         || relations.is_empty()
@@ -115,17 +183,21 @@ where
     }
     let contexts = sources
         .iter()
-        .map(|s| {
-            Ok((
-                s.parameters.context_digest::<F, H>().map_err(convert)?,
-                s.commitment,
-            ))
-        })
+        .map(|s| Ok((s.parameters.context().map_err(convert)?, s.commitment)))
         .collect::<Result<Vec<_>, Error>>()?;
-    trans.append_message(
-        b"packed canonical linear relations v1",
-        &(contexts, relations),
-    );
+    let normalized: Vec<_> = relations
+        .iter()
+        .map(|r| {
+            let coefficients = pp.normalize_values(r.terms.iter().map(|(a, _)| *a).collect());
+            Relation {
+                terms: coefficients
+                    .into_iter()
+                    .zip(r.terms.iter().map(|(_, i)| *i))
+                    .collect(),
+            }
+        })
+        .collect();
+    trans.append_message(P::LINEAR_DOMAIN, &(contexts, &normalized));
     (0..pp.num_vars())
         .map(|_| {
             challenge_pair(

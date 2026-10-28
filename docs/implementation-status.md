@@ -7,6 +7,14 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Canonical linear identities now dispatch through the packed backend boundary,
+with legacy Brakedown API/wire controls and a masked variant using the retained
+source sessions. Both selected fields pass decoded proofs and fresh false-identity
+certificates whose genuine child openings all verify. All 85 selected component/
+complete-PBS tests and the locked workspace check pass. See
+`canonical-packed-linear.md`; the remaining concrete
+transform/relation/setup boundaries and whole-proof security are still open.
+
 The deferred canonical opening registry now uses a statically selected PCS
 boundary shared by Brakedown and the masked packed adapter. Legacy API aliases
 retain their wire/transcript behavior against a frozen pre-refactor reference.

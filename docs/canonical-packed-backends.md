@@ -60,3 +60,9 @@ fifty-four attacks rejected). The locked workspace check passes. Logs, six maske
 registry records, checked counts and validated sources are under
 `target/performance/canonical-packed-backend-boundary/`; source SHA-256 is
 `b22762e362ea8e5c0f5555b5876125c9f8ac489b56111342da68f8eae352af8d`.
+
+Single-opening dispatch now supports shared canonical linear-identity proving and
+verification. The legacy Brakedown spelling remains an alias over its original
+packet shape; the masked variant enforces canonical response encodings. See
+`canonical-packed-linear.md` for the independent wire and fresh-false-identity
+checks. Other concrete PBS boundaries remain outstanding.

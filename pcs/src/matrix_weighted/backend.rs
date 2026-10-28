@@ -1,7 +1,7 @@
 //! Statically selected canonical packed-oracle backend boundary.
 //!
 //! Backend choice and parameters are trusted caller inputs, never proof metadata.
-use super::{BatchOpening, Commitment, Parameters, State, masked_polyfrim};
+use super::{BatchOpening, Commitment, Opening, Parameters, State, masked_polyfrim};
 use crate::utils::{code::RowCode, hash::Hash};
 use algebra::{
     AbstractExtensionField, NTTField, PrimeField,
@@ -18,6 +18,10 @@ pub trait CanonicalPcs<F: PrimeField, H: Hash + Send + Sync> {
     type State;
     /// Public ordered-query authentication packet.
     type BatchProof: Serialize;
+    /// Public authentication of one ordered query.
+    type SingleProof: Serialize;
+    /// Domain binding a complete trusted linear relation before fresh queries.
+    const LINEAR_DOMAIN: &'static [u8];
     /// Parameter/prover/verifier failure.
     type Error: std::fmt::Display;
     /// Registry framing, selected by the trusted backend.
@@ -41,6 +45,32 @@ pub trait CanonicalPcs<F: PrimeField, H: Hash + Send + Sync> {
     ) -> Result<(Vec<MatrixPair<F>>, Vec<F>), Self::Error> {
         Ok((query, values))
     }
+    /// Normalize public/proof scalar values for this backend's wire contract.
+    fn normalize_values(&self, values: Vec<F>) -> Vec<F> {
+        values
+    }
+    /// Reject unsupported encodings in already serialized proof responses.
+    fn validate_values(&self, _values: &[F]) -> Result<(), Self::Error> {
+        Ok(())
+    }
+    /// Authenticate one caller-derived ordered matrix response.
+    fn open(
+        &self,
+        t: &mut Transcript<F>,
+        root: &Commitment<H::Output>,
+        state: &Self::State,
+        query: &[MatrixPair<F>],
+        value: &[F],
+    ) -> Result<Self::SingleProof, Self::Error>;
+    /// Verify one response against the independently expected source root.
+    fn verify(
+        &self,
+        t: &mut Transcript<F>,
+        root: &Commitment<H::Output>,
+        query: &[MatrixPair<F>],
+        value: &[F],
+        proof: &Self::SingleProof,
+    ) -> Result<(), Self::Error>;
     /// Commit an original logical table, with fresh private randomness if needed.
     fn commit<R: Rng + CryptoRng>(
         &self,
@@ -76,6 +106,8 @@ where
 {
     type State = State<F, H>;
     type BatchProof = BatchOpening<F, H::Output>;
+    type SingleProof = Opening<F, H::Output>;
+    const LINEAR_DOMAIN: &'static [u8] = b"packed canonical linear relations v1";
     type Error = super::Error;
     const REGISTRY_DOMAIN: &'static [u8] = b"packed deferred opening registry v1";
     const CLAIM_DOMAIN: &'static [u8] = b"packed deferred opening claim v1";
@@ -88,6 +120,26 @@ where
     }
     fn context(&self) -> Result<H::Output, Self::Error> {
         self.context_digest::<F, H>()
+    }
+    fn open(
+        &self,
+        t: &mut Transcript<F>,
+        root: &Commitment<H::Output>,
+        state: &Self::State,
+        query: &[MatrixPair<F>],
+        value: &[F],
+    ) -> Result<Self::SingleProof, Self::Error> {
+        Parameters::open::<F, H>(self, t, root, state, query, value)
+    }
+    fn verify(
+        &self,
+        t: &mut Transcript<F>,
+        root: &Commitment<H::Output>,
+        query: &[MatrixPair<F>],
+        value: &[F],
+        proof: &Self::SingleProof,
+    ) -> Result<(), Self::Error> {
+        Parameters::verify::<F, H>(self, t, root, query, value, proof)
     }
     fn commit<R: Rng + CryptoRng>(
         &self,
@@ -128,6 +180,8 @@ where
 {
     type State = masked_polyfrim::State<F, EF, H>;
     type BatchProof = masked_polyfrim::Proof<EF, H::Output>;
+    type SingleProof = masked_polyfrim::Proof<EF, H::Output>;
+    const LINEAR_DOMAIN: &'static [u8] = b"masked packed canonical linear relations v2";
     type Error = masked_polyfrim::Error;
     const REGISTRY_DOMAIN: &'static [u8] = b"masked packed opening registry v2";
     const CLAIM_DOMAIN: &'static [u8] = b"masked packed opening claim v2";
@@ -148,6 +202,38 @@ where
     ) -> Result<(Vec<MatrixPair<F>>, Vec<F>), Self::Error> {
         let (mut queries, mut values) = self.claims(&[query], &[values])?;
         Ok((queries.remove(0), values.remove(0)))
+    }
+    fn normalize_values(&self, values: Vec<F>) -> Vec<F> {
+        values.into_iter().map(|v| v.canonicalized()).collect()
+    }
+    fn validate_values(&self, values: &[F]) -> Result<(), Self::Error> {
+        if values.iter().any(|v| !v.is_canonical()) {
+            Err(masked_polyfrim::Error(
+                "noncanonical public packed response",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+    fn open(
+        &self,
+        t: &mut Transcript<F>,
+        root: &Commitment<H::Output>,
+        state: &Self::State,
+        query: &[MatrixPair<F>],
+        value: &[F],
+    ) -> Result<Self::SingleProof, Self::Error> {
+        self.open_many::<H>(t, root, state, &[query.to_vec()], &[value.to_vec()])
+    }
+    fn verify(
+        &self,
+        t: &mut Transcript<F>,
+        root: &Commitment<H::Output>,
+        query: &[MatrixPair<F>],
+        value: &[F],
+        proof: &Self::SingleProof,
+    ) -> Result<(), Self::Error> {
+        self.verify_many::<H>(t, root, &[query.to_vec()], &[value.to_vec()], proof)
     }
     fn commit<R: Rng + CryptoRng>(
         &self,
