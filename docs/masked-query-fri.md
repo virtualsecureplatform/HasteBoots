@@ -75,8 +75,8 @@ cargo check --workspace --all-targets
 
 This implementation retains full virtual-source arrays and all intermediate
 ladders during a batch; large native batches need further memory work. A
-separate trusted canonical backend and complete-PBS integration are still
-required. Complete 1/4/16-statement aggregation, robust vector proximity,
+separate trusted canonical backend and small complete-PBS integration are now
+validated; see [canonical aggregated backend](canonical-aggregated-backend.md). Complete 1/4/16-statement aggregation, robust vector proximity,
 Fiat–Shamir/knowledge/security composition, hiding, original-size complete
 validation, isolated security-matched byte/latency gates and independent review
 remain open. No whole-security, hiding or latency certification follows from
