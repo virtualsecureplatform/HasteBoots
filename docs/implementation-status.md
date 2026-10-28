@@ -7,6 +7,18 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Complete v6/v7 batch proving now borrows retained source tables instead of
+cloning every Hadamard factor into a second buffer. At native batch size sixteen,
+this removes 2.125/8.25 GiB of requested field-buffer storage for BabyBear and
+Goldilocks, respectively; process peak RSS and complete latency are not yet
+measured. Eighteen targeted release tests pass, including owned/borrowed proof
+and transcript equivalence and forty reconstructed complete v6/v7 certificates.
+Twelve frozen-binary complete wire controls (84 fresh member instances) match
+all earlier v6/v7 proof bytes and hashes exactly. See `packed-borrowed-batches.md`.
+The original-size frozen v7 owning build has
+completed all three BabyBear certificates covering 21 fresh statements; Goldilocks
+is still running. These native results do not validate the new borrowed build.
+
 Opt-in complete outer version 7 now deduplicates repeated canonical Hadamard
 roots under a common query. Every member retains version 6 constraints and every
 relation equation is checked independently; conflicting aliases reject before
