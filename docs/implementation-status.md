@@ -7,6 +7,16 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+A non-hiding joint-query proximity kernel now shares one rolling-FRI certificate
+across 1/4/16 ordered matrix-query ladders on the same source. All 65 release
+core tests pass, including fresh over-degree forgeries with valid consistency
+and Merkle authentication that reject at the shared FRI fold; fresh valid FRI
+proofs for substituted projections reject at the original-root binding. Six decoded
+packets verify; 4/16-query packets are about 21.5/27% smaller than independent
+controls. See `joint-query-proximity.md`. Masked/canonical/PBS integration,
+complete-statement aggregation and all original security/performance gates remain
+open. The existing masked backend is unchanged.
+
 The canonical prover now releases completed blind-rotation witness owners before
 allocating final key-switching sources. All four complete joint-backend proof
 profiles (versions 10/11, both fields) retain exact archived non-timing fields,

@@ -63,3 +63,10 @@ the executed source archive SHA-256 is
 The release build, workspace all-target check, Rust format check and Python
 syntax checks pass. These checks validate the harness build; native proof and
 replay completion require the runtime evidence above.
+
+Concurrent aggregation development builds/tests are recorded in the initial
+Goldilocks run's `timing-exclusions.json`. That run remains a correctness and
+per-process resource control. Its raw times are ineligible for performance
+comparison; the original requirement for isolated security-matched timing runs
+is unchanged. The frozen native executable and its executed source archive
+remain unchanged while development continues.

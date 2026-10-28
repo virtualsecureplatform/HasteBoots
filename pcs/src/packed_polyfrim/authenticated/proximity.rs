@@ -4,6 +4,9 @@
 //! knowledge, Fiat–Shamir or whole-PBS security certificate.
 use super::*;
 
+/// Experimental joint rolling proximity across ordered matrix-query ladders.
+pub mod batch;
+
 /// Matrix consistency and same-root projected rolling-proximity certificate.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Proof<F, O> {
