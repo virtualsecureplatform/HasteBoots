@@ -140,7 +140,7 @@ concurrent runs are correctness-only, with no performance claims. Their manifest
 links the immutable build snapshot and exact executables above; subsequent
 shared-challenge relation development does not change those frozen artifacts.
 Version 6 adds an explicit joint-Hadamard batch composition; see
-`packed-joint-pbs.md`. Its original-size validation and stronger binding audits,
-further cross-statement stage sharing, hiding, independent whole-security review
-and promotion remain open. The relation batching component is described
+`packed-joint-pbs.md`. Its original-size validation and reconstructed binding audits now pass. Further
+cross-statement stage sharing, hiding, independent whole-security review and
+promotion remain open. The relation batching component is described
 separately in `packed-batch-relations.md`.

@@ -112,5 +112,6 @@ fixture changed; the measured production and benchmark sources remain identical.
 This frontend alone does not constitute a complete cross-statement PBS batch.
 Experimental version 6 now adds a batch witness owner and complete canonical
 stage composition around it, while retaining other constraints per member;
-see `packed-joint-pbs.md`. Its original-size validation, further stage sharing,
-hiding, independent security review and promotion remain separate open gates.
+see `packed-joint-pbs.md`. Its original-size 1/4/16 validation and reconstructed
+binding audits now pass; further stage sharing, hiding, independent security
+review and promotion remain separate open gates.

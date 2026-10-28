@@ -27,7 +27,9 @@ private batch owner after its other constraints succeed. It does not recompute
 or recommit those evaluation sources. Public-key states come from the shared
 trusted preprocessing. Factor buffers are cloned for the existing algebra API,
 so holding multiple traces, retained states and partial certificates increases
-peak memory; native memory validation is still in progress.
+peak memory. The original-size correctness runs below peak at about 27.9 GiB
+(BabyBear) / 75.3 GiB (Goldilocks) across sizes 1/4/16. These process resource
+measurements do not constitute a comparative memory benchmark.
 
 For each member, expected Hadamard roots are reconstructed from its canonical
 evaluation roots and the trusted bootstrapping-key roots, in the original
@@ -82,8 +84,20 @@ reordered statements even when members follow that reordering, alternate keys,
 changed canonical roots/endpoints/decomposition/extraction, and false root
 claims preserving the local terminal Hadamard equation. A requested wrong
 output cannot be proved with the original trace. The tests cover the last
-member, not only the first. Stronger fresh reconstructed-child v6 binding
-audits remain pending; mutation tests are not a substitute for them.
+member, not only the first.
+
+Fresh reconstructed-child v6 audits now pass twenty certificates over both
+fields: two controls accepted and eighteen intended rejections. Each fixture
+rebuilds member children under the requested version-6 context, constructs fresh
+joint algebra, and authenticates actual source roots with a separately checked
+local replay. The production verifier then rejects wrong input/output/key,
+initial/final endpoints, spliced rounds and inconsistent duplicated views at
+the intended equations or authentication checks. Most cases include a distinct
+honest anchor member, placing the forged member first or last; the two key
+attacks use single-member batches. All twenty outer certificates are decoded
+before production verification. Across versions 2–6, thirteen audit tests pass
+130 reconstructed certificates (thirteen controls, 117 rejections). This is
+test-dimension binding evidence, not a security theorem or native attack audit.
 
 Workspace/examples and release builds pass; all 86 Python tests pass. Fifty
 decoded standalone v3/v4/v5 packets retain exact archived bytes and bindings.
@@ -102,9 +116,18 @@ hashes are `88fdf79fe75b67b9f9c77b398b80ff84bc81906c884e3d9820dbc2a61fd43400`
 (BabyBear) and `bfd322349602f0680331d22a268c69b347033cd1153080b2aec6ed2c3ababd5f`
 (Goldilocks).
 
-Original ring-1024/LWE-728 validation is running serially by field under
-`target/performance/joint-pbs-native/`, using these frozen executables. It will
-verify three joint certificates per field covering 21 fresh statements and
-compare every native fixture. These are correctness-only runs. Completion,
-native performance/memory comparisons, further cross-statement stage sharing,
-hiding, whole-security review and promotion remain pending.
+Original ring-1024/LWE-728 validation is complete under
+`target/performance/joint-pbs-native/`, using these frozen executables. All six joint certificates verify, covering
+42 fresh NAND statements with exact archived statement/key/parameter/layout
+matches. All per-member root inventories are linked to the verified batch
+digest and retain counts 75/131. Both processes exit successfully. The unchanged
+conservative conditional 21-member interactive inventories are
+130.50895/130.16056 bits, with 129.32427 bits for all 42 members; these are not
+Fiat–Shamir certificates. The runs are correctness-only, not timing evidence.
+
+The audit evidence is under `target/performance/joint-pbs-binding-audit/`, with
+raw release-test output, all 130 cases, twenty v6 slot/context records and checked
+summaries. It changes only test helpers and invocation files; production sources
+and the frozen native executables remain unchanged. Native performance/memory
+comparisons, further cross-statement stage sharing, hiding, whole-security review
+and promotion remain pending.
