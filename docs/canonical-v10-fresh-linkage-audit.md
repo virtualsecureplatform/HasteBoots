@@ -13,7 +13,7 @@ runs. The existing encrypted version-10 completeness fixtures remain separate.
 
 ## Cases and strict replay
 
-Each backend/field pair has an accepted control and ten rejected cases:
+Each backend/field pair has an accepted control and eleven rejected cases:
 
 - `Initial`: a different requested input body changes the public initial
   accumulator while the committed accumulator belongs to the original body.
@@ -35,9 +35,15 @@ Each backend/field pair has an accepted control and ten rejected cases:
   requested trusted key has radix-weighted body-key limbs; its actual source
   terminals and all downstream children authenticate successfully.
 
+- `SwitchKeyProduct`: a genuine trusted blind-rotation product creates a nonzero
+  accumulator mask. The known negative-mask source and canonical digits are
+  correct, but the final zero sum product belongs to a foreign zero switching
+  key. All final-stage openings authenticate the requested radix-weighted
+  switching key; extraction remains valid for the zero product.
+
 Every certificate is serialized and decoded. Independent complete replay uses
 production NTT and decomposition verification. Test-only key-product, accumulator,
-monomial and final key-switch replay separately report the key-product, linkage,
+monomial and final key-switch replay separately report both key products, linkage,
 public-factor and extraction identities while strictly authenticating every actual-root PCS
 opening and checking all other stage equations. Each attack fails only its
 intended identity. Prover and replay finish with identical transcript challenges.
@@ -49,11 +55,11 @@ no proof flag selects relaxed checks.
 
 ## Scope and remaining work
 
-The audit covers a foreign bootstrapping-key product, accumulator linkage, public
-rotations and final extraction. It does not replace fresh complete attacks at final switching-key products or
-canonical comparison identities, nor an audit using secure encrypted original-size
-fixtures. Component attacks at those layers are already
-separate evidence, not a substitute for complete composition checks.
+The audit covers foreign bootstrapping-key and switching-key products, accumulator
+linkage, public rotations and final extraction. It does not replace fresh complete
+attacks at canonical comparison identities, nor an audit using secure encrypted
+original-size fixtures. Component attacks at those layers are already separate
+evidence, not a substitute for complete composition checks.
 
 The masked fixtures use one proximity query for completeness testing. General
 hiding, robust vector proximity, knowledge/Fiat-Shamir composition, genuine joint
@@ -61,23 +67,23 @@ aggregation and the original matched-security performance gates remain open.
 
 ## Running and evidence
 
-The two ordinary audit tests generate twenty-two certificates. The twenty-two
-masked tests each generate one full certificate and are explicitly ignored by default
-because they require substantial CPU and memory. Run them manually:
+The two ordinary audit tests generate twenty-four certificates. The twenty-four
+masked tests each generate one full certificate and are explicitly ignored by
+default because they require substantial CPU and memory. Run them manually:
 
 ```sh
 RAYON_NUM_THREADS=8 cargo test --release --locked -p snarks --lib \
   packed_pbs::canonical::audit::masked_ -- --ignored --nocapture --test-threads=2
 ```
 
-The validation run used twenty-two concurrent audit workers on the available
-125-GiB host. Both backends and fields have one accepted control and ten
-rejected attacks, for forty-four fresh complete certificates overall: four controls
-accepted and forty attacks rejected. All strict child replay and final
+The validation run used twenty-four concurrent audit workers on the available
+125-GiB host. Both backends and fields have one accepted control and eleven
+rejected attacks, for forty-eight fresh complete certificates overall: four controls
+accepted and forty-four attacks rejected. All strict child replay and final
 transcript equality checks pass.
 
-Validation passes 62 default release/locked unit tests and all twenty-two manual
-masked audit tests, for 84 unique test cases. The locked workspace check passes.
+Validation passes 62 default release/locked unit tests and all twenty-four manual
+masked audit tests, for 86 unique test cases. The locked workspace check passes.
 The validated source snapshot, checked certificate records and logs are under
-`target/performance/v10-fresh-key-product-audit/`. The earlier accumulator-only run
+`target/performance/v10-fresh-switch-key-audit/`. The earlier accumulator-only run
 remains archived under `target/performance/v10-fresh-linkage-audit/`.

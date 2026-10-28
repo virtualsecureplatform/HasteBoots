@@ -18,6 +18,7 @@ enum Attack {
     ExtractionA,
     ExtractionB,
     KeyProduct,
+    SwitchKeyProduct,
 }
 impl Attack {
     fn accumulator_valid(self) -> bool {
@@ -28,6 +29,7 @@ impl Attack {
                 | Self::ExtractionA
                 | Self::ExtractionB
                 | Self::KeyProduct
+                | Self::SwitchKeyProduct
         )
     }
     fn monomial_valid(self) -> bool {
@@ -39,6 +41,7 @@ impl Attack {
 }
 struct Report {
     key_product: bool,
+    switch_key_product: bool,
     accumulator: bool,
     monomial: bool,
     extraction: bool,
@@ -114,13 +117,13 @@ where
             inputs[1].fill(F::one());
             co[d].fill(F::one());
         }
-        Attack::Rotation | Attack::KeyProduct => {
+        Attack::Rotation | Attack::KeyProduct | Attack::SwitchKeyProduct => {
             let p: u128 = F::MODULUS_VALUE.to_string().parse().unwrap();
             s.mask[0] = F::from((p / (4 * cfg.n as u128)) as usize);
         }
         Attack::Control | Attack::ExtractionA | Attack::ExtractionB => {}
     }
-    if attack == Attack::KeyProduct {
+    if matches!(attack, Attack::KeyProduct | Attack::SwitchKeyProduct) {
         // Rotate only the first active round. The zero-key trace leaves its
         // accumulator unchanged, but has a genuine nonzero external input.
         for h in 0..2 {
@@ -152,6 +155,22 @@ where
             }
         }
     }
+    if attack == Attack::SwitchKeyProduct {
+        // The genuine BR key sends the first body external input into mask a.
+        // Later identity rotations preserve this new accumulator mask.
+        let delta = ac[2][half..half + cfg.n].to_vec();
+        for j in 0..cfg.n {
+            co[2 * d][j] = delta[j];
+            ac[3][j] = delta[j];
+            final_acc[j] = delta[j];
+            for row in 1..cfg.lwe {
+                for source in [0, 1, 3] {
+                    ac[source][row * cfg.n + j] = delta[j];
+                }
+            }
+        }
+        assert!(final_acc[..cfg.n].iter().any(|&x| x != F::zero()));
+    }
     let final_acc = pp.coefficients.normalize_values(final_acc);
     s.output_b = final_acc[cfg.n] + mono::nand_lut::<F>(cfg.n, cfg.lut_step).unwrap()[0];
     let actual_output = s.output.clone();
@@ -164,7 +183,10 @@ where
     }
     let (plan, requested_initial) = public_inputs(cfg, &s.borrowed()).unwrap();
     let actual_plan = mono::Plan::new(cfg.n, vec![0; cfg.lwe]).unwrap();
-    if matches!(attack, Attack::Rotation | Attack::KeyProduct) {
+    if matches!(
+        attack,
+        Attack::Rotation | Attack::KeyProduct | Attack::SwitchKeyProduct
+    ) {
         assert_eq!(plan.rotations()[0], 1);
     } else {
         assert!(plan.rotations().iter().all(|&r| r == 0));
@@ -312,16 +334,12 @@ where
         &mut rng,
     )
     .unwrap();
-    let ks_count = expected.ks.config().digits::<F>().unwrap();
-    let zeros = vec![
-        PackedTable::new(
-            pp.final_stage.coefficients.num_vars(),
-            width,
-            vec![F::zero(); 2 * cfg.n]
-        )
-        .unwrap();
-        ks_count + 1
-    ];
+    let coefficients = final_stage::audit::zero_key_coefficients::<F, Sha256, P>(
+        &pp.final_stage,
+        &expected.ks,
+        &final_acc,
+    )
+    .unwrap();
     let key_switch = final_stage::audit::prove_foreign::<F, EF, Sha256, P, _>(
         &mut trans,
         &pp.final_stage,
@@ -331,7 +349,8 @@ where
         s.output_b,
         &actual_output,
         actual_body,
-        &zeros,
+        &coefficients,
+        attack == Attack::SwitchKeyProduct,
         &mut rng,
     )
     .unwrap();
@@ -507,7 +526,7 @@ where
         &proof.monomial,
     )
     .map_err(convert)?;
-    let extraction_valid = final_stage::audit::verify::<F, EF, H, P>(
+    let (switch_key_product_valid, extraction_valid) = final_stage::audit::verify::<F, EF, H, P>(
         trans,
         &pp.final_stage,
         &setup.ks,
@@ -519,6 +538,7 @@ where
     .map_err(convert)?;
     Ok(Report {
         key_product: key_product_valid,
+        switch_key_product: switch_key_product_valid,
         accumulator: linkage_valid,
         monomial: monomial_valid,
         extraction: extraction_valid,
@@ -548,6 +568,10 @@ fn run<F, EF, P>(
         reference_transcript::<F, EF, Sha256, P>(pp, &expected, &s.borrowed(), &proof, &mut replay)
             .unwrap();
     assert_eq!(report.key_product, attack != Attack::KeyProduct);
+    assert_eq!(
+        report.switch_key_product,
+        attack != Attack::SwitchKeyProduct
+    );
     assert_eq!(report.accumulator, attack.accumulator_valid());
     assert_eq!(report.monomial, attack.monomial_valid());
     assert_eq!(report.extraction, attack.extraction_valid());
@@ -561,7 +585,7 @@ fn run<F, EF, P>(
     } else {
         let err = result.unwrap_err();
         let label = match attack {
-            Attack::KeyProduct => "packed ZeroCheck terminal identity",
+            Attack::KeyProduct | Attack::SwitchKeyProduct => "packed ZeroCheck terminal identity",
             Attack::Rotation => "packed public monomial product",
             Attack::ExtractionA | Attack::ExtractionB => "packed ZeroCheck terminal identity",
             _ => "packed accumulator linkage",
@@ -569,11 +593,12 @@ fn run<F, EF, P>(
         assert!(err.0.contains(label), "{attack:?}: {err}");
     }
     println!(
-        "HB_V10_FRESH_LINKAGE_CASE {{\"protocol_version\":10,\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_key_product_valid\":{},\"reference_linkage_valid\":{},\"reference_monomial_valid\":{},\"reference_extraction_valid\":{},\"production_accepted\":{},\"encrypted_profile\":false,\"original_size\":false}}",
+        "HB_V10_FRESH_LINKAGE_CASE {{\"protocol_version\":10,\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_key_product_valid\":{},\"reference_switch_key_product_valid\":{},\"reference_linkage_valid\":{},\"reference_monomial_valid\":{},\"reference_extraction_valid\":{},\"production_accepted\":{},\"encrypted_profile\":false,\"original_size\":false}}",
         F::MODULUS_VALUE,
         backend,
         attack,
         report.key_product,
+        report.switch_key_product,
         report.accumulator,
         report.monomial,
         report.extraction,
@@ -659,6 +684,32 @@ where
     )
     .unwrap();
     run::<F, EF, _>(&pp, &setup, Attack::KeyProduct, "brakedown");
+    let mut weight = F::one();
+    for limb in br[0].c_m_mut().iter_mut() {
+        limb.b_mut_slice().fill(F::zero());
+        limb.a_mut_slice().fill(weight);
+        weight *= F::from(256usize);
+    }
+    let mut ks = ks;
+    let mut weight = F::one();
+    for limb in ks[0].iter_mut() {
+        limb.b_mut_slice().fill(weight);
+        weight *= F::from(32usize);
+    }
+    let setup = canonical_setup::preprocess::<F, Sha256, _, _>(
+        &canonical_setup::Parameters {
+            source: &codes[0],
+            helper: &codes[1],
+            final_source: &codes[2],
+            final_helper: &codes[3],
+        },
+        setup.verifier().config,
+        &br,
+        &ks,
+        &mut StdRng::seed_from_u64(1602),
+    )
+    .unwrap();
+    run::<F, EF, _>(&pp, &setup, Attack::SwitchKeyProduct, "brakedown");
 }
 #[test]
 fn ordinary_babybear_complete_linkage() {
@@ -727,7 +778,19 @@ where
             weight *= F::from(256usize);
         }
     }
-    let ks = vec![NTTGadgetRLWE::<F>::zero(32, Basis::new(5))];
+    let mut ks = vec![NTTGadgetRLWE::<F>::zero(32, Basis::new(5))];
+    if attack == Attack::SwitchKeyProduct {
+        let mut weight = F::one();
+        for limb in br[0].c_m_mut().iter_mut() {
+            limb.a_mut_slice().fill(weight);
+            weight *= F::from(256usize);
+        }
+        let mut weight = F::one();
+        for limb in ks[0].iter_mut() {
+            limb.b_mut_slice().fill(weight);
+            weight *= F::from(32usize);
+        }
+    }
     let setup = canonical_setup::preprocess::<F, Sha256, _, _>(
         &canonical_setup::Parameters {
             source: &key,
@@ -921,4 +984,19 @@ masked_case!(
     algebra::GoldilocksExtension3,
     4,
     KeyProduct
+);
+
+masked_case!(
+    masked_babybear_switch_key_product,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    SwitchKeyProduct
+);
+masked_case!(
+    masked_goldilocks_switch_key_product,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    SwitchKeyProduct
 );

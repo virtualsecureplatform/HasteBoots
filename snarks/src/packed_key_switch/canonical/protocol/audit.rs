@@ -1,4 +1,4 @@
-//! Test-only false extraction targets; all actual-root openings remain strict.
+//! Test-only foreign key products and extraction targets; strict source openings.
 use super::*;
 pub(crate) fn prove_foreign<F, EF, H, P, R>(
     trans: &mut Transcript<F>,
@@ -10,6 +10,7 @@ pub(crate) fn prove_foreign<F, EF, H, P, R>(
     actual_a: &[F],
     actual_b: F,
     coefficients: &[PackedTable<F>],
+    foreign_key: bool,
     rng: &mut R,
 ) -> Result<Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>, Error>
 where
@@ -93,13 +94,39 @@ where
         .flat_map(|i| [&ev[i], &ko[i]])
         .chain(std::iter::once(&ev[d]))
         .collect();
-    let product = packed_relation::prove_canonical::<F, H, P>(
-        trans,
-        &product_shape_dimensions(pp.evaluations.num_vars(), pp.evaluations.width(), d),
-        &factors,
-        &mut packed_relation::ProverStatistics::default(),
-    )
-    .map_err(convert)?;
+    let product = if foreign_key {
+        let foreign: Vec<_> = factors
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                if i % 2 == 1 {
+                    PackedTable::new(
+                        pp.evaluations.num_vars(),
+                        pp.evaluations.width(),
+                        vec![F::zero(); s.table().values().len()],
+                    )
+                    .unwrap()
+                } else {
+                    s.table().clone()
+                }
+            })
+            .collect();
+        packed_relation::audit::prove_foreign::<F, H, P>(
+            trans,
+            &product_shape_dimensions(pp.evaluations.num_vars(), pp.evaluations.width(), d),
+            &factors,
+            &foreign,
+        )
+        .map_err(convert)?
+    } else {
+        packed_relation::prove_canonical::<F, H, P>(
+            trans,
+            &product_shape_dimensions(pp.evaluations.num_vars(), pp.evaluations.width(), d),
+            &factors,
+            &mut packed_relation::ProverStatistics::default(),
+        )
+        .map_err(convert)?
+    };
     let source = CanonicalProverOracle::<F, H, P> {
         parameters: pp.input,
         commitment: &input_root,
@@ -168,7 +195,7 @@ pub(crate) fn verify<F, EF, H, P>(
     a: &[F],
     b: F,
     proof: &Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>,
-) -> Result<bool, Error>
+) -> Result<(bool, bool), Error>
 where
     F: NTTField + Serialize,
     EF: AbstractExtensionField<F> + Serialize,
@@ -216,7 +243,7 @@ where
             commitment: s.commitment,
         })
         .collect();
-    packed_relation::verify_canonical::<F, H, P>(
+    let product_valid = packed_relation::audit::verify::<F, H, P>(
         trans,
         &product_shape_dimensions(pp.evaluations.num_vars(), pp.evaluations.width(), d),
         &factors,
@@ -271,5 +298,38 @@ where
             &proof.extraction.opening,
         )
         .map_err(convert)?;
-    Ok(valid)
+    Ok((product_valid, valid))
+}
+
+/// Genuine canonical negative-a digits with the zero-key product as final word.
+pub(crate) fn zero_key_coefficients<F, H, P>(
+    pp: &Parameters<'_, P>,
+    key: &ExpectedKey<H::Output>,
+    acc: &[F],
+) -> Result<Vec<PackedTable<F>>, Error>
+where
+    F: NTTField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    let cfg = &key.config;
+    let source = input_dimensions(pp.input.num_vars(), pp.input.width(), cfg, acc)?;
+    let d = cfg.digits::<F>()?;
+    let radix = cfg.decomposition::<F>()?.radix().map_err(convert)?;
+    let mut words = vec![vec![F::zero(); source.values().len()]; d + 1];
+    for (row, &x) in source.values().iter().enumerate() {
+        let mut integer: usize = x.canonicalized().value().try_into().ok().unwrap();
+        for limb in words.iter_mut().take(d) {
+            limb[row] = F::from(integer % radix);
+            integer /= radix;
+        }
+        assert_eq!(integer, 0);
+    }
+    words
+        .into_iter()
+        .map(|v| {
+            PackedTable::new(pp.coefficients.num_vars(), pp.coefficients.width(), v)
+                .map_err(convert)
+        })
+        .collect()
 }

@@ -7,9 +7,9 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
-Fresh complete v10 key-product, linkage, rotation and extraction certificates pass strict child and
+Fresh complete v10 bootstrapping/switching-key product, linkage, rotation and extraction certificates pass strict child and
 actual-root replay on both backends and selected fields. Four controls are
-accepted and forty key-product/endpoint/addition/continuity/digit-view/rotation/extraction attacks are
+accepted and forty-four key-product/endpoint/addition/continuity/digit-view/rotation/extraction attacks are
 rejected after fresh proof construction. See `canonical-v10-fresh-linkage-audit.md`.
 Other complete attack classes, secure encrypted/original-size audits, joint
 aggregation and security/performance promotion remain open.
