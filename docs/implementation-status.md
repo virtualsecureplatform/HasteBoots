@@ -7,6 +7,12 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Extension-field rational lookups now expose canonical backend authentication
+for original sources and coefficient-packed reciprocal helpers, retaining the
+existing scalar extension algebra and base-field pullback maps. See
+`canonical-extension-lookups.md`. Shared/deferred comparison composition and
+complete masked PBS integration remain open.
+
 Public monomial products now have a canonical backend entry point, composing
 both original-source NTT links with the caller-derived public rotation identity.
 Derived roots retain one bounded session across NTT and terminal openings. See

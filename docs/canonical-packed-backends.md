@@ -95,3 +95,8 @@ backends, with retained state authentication and backend-specific framing. See
 Public monomial products also compose canonical NTT and terminal authentication,
 with explicit trusted evaluation parameters and private derived-root commitment
 randomness. See `canonical-packed-monomial.md`; full masked PBS remains open.
+
+Standalone extension-field lookups also authenticate original sources and
+coefficient-packed reciprocal helpers through canonical backends. The selected
+extension algebra is preserved. See `canonical-extension-lookups.md`; shared
+comparison composition and complete masked PBS remain open.

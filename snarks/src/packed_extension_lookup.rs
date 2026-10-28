@@ -909,3 +909,6 @@ mod tests {
     }
 
 }
+
+/// Extension algebra over statically selected canonical PCS backends.
+pub mod canonical;
