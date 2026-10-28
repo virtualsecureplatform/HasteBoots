@@ -7,6 +7,14 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Masked ordered batches now share both original-source and query-ladder rolling
+FRI, with strict original-to-virtual authentication and the original per-query
+allowances. Six decoded 1/4/16-query batches verify; 16-query packets are about
+32% smaller than the prior joint-source format. All 70 core tests, repeated
+component fingerprints and both base-field adapter tests pass. See
+`masked-query-fri.md`. Canonical backend/PBS integration, native batch memory,
+new-schedule hiding/security and the original full-plan gates remain open.
+
 A non-hiding joint-query proximity kernel now shares one rolling-FRI certificate
 across 1/4/16 ordered matrix-query ladders on the same source. All 65 release
 core tests pass, including fresh over-degree forgeries with valid consistency
@@ -21,8 +29,9 @@ The canonical prover now releases completed blind-rotation witness owners before
 allocating final key-switching sources. All four complete joint-backend proof
 profiles (versions 10/11, both fields) retain exact archived non-timing fields,
 including serialized proof hashes. Original key-owner lifetimes remain intact.
-See `canonical-witness-release.md`. A tracked original-size Goldilocks masked PBS proof/replay run is now launched;
-it is not yet verified. See `native-complete-masked-pbs-profile.md`.
+See `canonical-witness-release.md`. The first original-size Goldilocks masked PBS run terminated with an
+insufficient accumulator opening allowance; no complete proof was produced.
+See `native-complete-masked-pbs-profile.md`.
 
 Original-size native masked key owners now pass resource validation in both
 fields with the original FHE constants and 128 sampling queries. Four isolated
@@ -39,8 +48,8 @@ original native key-source dimensions. After-commit RSS drops by about 384 MiB
 per owner in both fields, with exact proof/root/transcript fingerprints across
 both cache policies and repetitions. Single-source peak RSS is unchanged and
 regeneration increases proving time. See `native-source-cache-profile.md`.
-Original-size masked native-key setup is now measured separately; complete
-original-size masked PBS remains unmeasured.
+Original-size masked native-key setup is measured separately; complete
+original-size masked PBS remains unverified.
 
 Masked source owners now support an opt-in transient encoded-codeword cache.
 It regenerates the identical oracle once per batch and releases it afterward,

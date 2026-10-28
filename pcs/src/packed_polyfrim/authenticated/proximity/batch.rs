@@ -17,6 +17,12 @@ pub struct Proof<F, O> {
     pub packed: Vec<Vec<Vec<Pair<F, O>>>>,
 }
 
+// Source indices are prover-only authentication routing, never wire metadata.
+pub(in crate::packed_polyfrim::authenticated) struct SourceTrace {
+    pub(in crate::packed_polyfrim::authenticated) consistency: Vec<Vec<usize>>,
+    pub(in crate::packed_polyfrim::authenticated) proximity: Vec<usize>,
+}
+
 fn statements<F: Field + Serialize>(
     pp: &Parameters<F>,
     queries: &[Vec<MatrixPair<F>>],
@@ -123,31 +129,92 @@ fn prove_inner<F: Field + Serialize, H: Hash + Send + Sync>(
         rolling_fri::Error,
     >,
 ) -> Result<Proof<F, H::Output>, Error> {
+    let sources = vec![source; queries.len()];
+    prove_sources_inner(
+        t,
+        pp,
+        &source.root(),
+        &sources,
+        queries,
+        claims,
+        false,
+        prove_fri,
+    )
+    .map(|(proof, _)| proof)
+}
+pub(in crate::packed_polyfrim::authenticated) fn prove_sources<
+    F: Field + Serialize,
+    H: Hash + Send + Sync,
+>(
+    t: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    binding: &H::Output,
+    sources: &[&State<F, H>],
+    queries: &[Vec<MatrixPair<F>>],
+    claims: &[Vec<F>],
+) -> Result<(Proof<F, H::Output>, SourceTrace), Error> {
+    prove_sources_inner(
+        t,
+        pp,
+        binding,
+        sources,
+        queries,
+        claims,
+        true,
+        rolling_fri::prove_virtual_all::<F, H>,
+    )
+}
+fn prove_sources_inner<F: Field + Serialize, H: Hash + Send + Sync>(
+    t: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    binding: &H::Output,
+    sources: &[&State<F, H>],
+    queries: &[Vec<MatrixPair<F>>],
+    claims: &[Vec<F>],
+    virtual_source: bool,
+    prove_fri: impl FnOnce(
+        &mut Transcript<F>,
+        &rolling_fri::Parameters<F>,
+        &[H::Output],
+        Vec<Vec<F>>,
+    ) -> Result<
+        (rolling_fri::Proof<F, H::Output>, rolling_fri::Trace<F>),
+        rolling_fri::Error,
+    >,
+) -> Result<(Proof<F, H::Output>, SourceTrace), Error> {
     statements(pp, queries, claims)?;
-    let layers = queries
+    if sources.len() != queries.len() {
+        return Err(Error("joint proximity source count"));
+    }
+    let layers = sources
         .iter()
+        .zip(queries)
         .zip(claims)
-        .map(|(q, c)| ladder(pp, source, q, c))
+        .map(|((source, q), c)| ladder(pp, source, q, c))
         .collect::<Result<Vec<_>, _>>()?;
-    let states: Vec<Vec<_>> = layers
+    let states: Vec<Vec<_>> = sources
         .iter()
-        .map(|layers| std::iter::once(source).chain(layers.iter()).collect())
+        .zip(&layers)
+        .map(|(source, layers)| std::iter::once(*source).chain(layers.iter()).collect())
         .collect();
     let roots: Vec<Vec<_>> = states
         .iter()
         .map(|s| s.iter().map(|s| s.root()).collect())
         .collect();
-    begin(t, pp, &source.root(), queries, claims, &roots);
-    let consistency = states
+    if virtual_source {
+        t.append_message(b"packed PolyFRIM joint virtual sources v1", &());
+    }
+    begin(t, pp, binding, queries, claims, &roots);
+    let (consistency, consistency_indices): (Vec<_>, Vec<_>) = states
         .iter()
         .zip(queries)
         .zip(claims)
         .enumerate()
         .map(|(index, ((states, query), claim))| {
             member(t, index);
-            certificate_traced(t, pp, states, query, claim, false).0
+            certificate_traced(t, pp, states, query, claim, virtual_source)
         })
-        .collect();
+        .unzip();
     let (weights, identifiers) = project::<F, H>(t, pp, &roots);
     let values = (0..pp.rounds())
         .map(|layer| {
@@ -182,7 +249,11 @@ fn prove_inner<F: Field + Serialize, H: Hash + Send + Sync>(
                                 values: state.values()
                                     [position * 2 * pp.width..(position + 1) * 2 * pp.width]
                                     .to_vec(),
-                                path: state.tree.query(position),
+                                path: if virtual_source && layer == 0 {
+                                    vec![]
+                                } else {
+                                    state.tree.query(position)
+                                },
                             }
                         })
                         .collect()
@@ -190,11 +261,17 @@ fn prove_inner<F: Field + Serialize, H: Hash + Send + Sync>(
                 .collect()
         })
         .collect();
-    Ok(Proof {
-        consistency,
-        proximity,
-        packed,
-    })
+    Ok((
+        Proof {
+            consistency,
+            proximity,
+            packed,
+        },
+        SourceTrace {
+            consistency: consistency_indices,
+            proximity: trace.indices,
+        },
+    ))
 }
 
 /// Check every same-root matrix ladder and authenticate the joint projection
@@ -207,9 +284,37 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
     claims: &[Vec<F>],
     proof: &Proof<F, H::Output>,
 ) -> Result<(), Error> {
+    let sources = vec![*source; queries.len()];
+    verify_sources::<F, H>(
+        t,
+        pp,
+        source,
+        &sources,
+        queries,
+        claims,
+        proof,
+        false,
+        |_, _, _| Err(Error("unexpected virtual source")),
+    )
+}
+pub(in crate::packed_polyfrim::authenticated) fn verify_sources<
+    F: Field + Serialize,
+    H: Hash + Send + Sync,
+>(
+    t: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    binding: &H::Output,
+    sources: &[H::Output],
+    queries: &[Vec<MatrixPair<F>>],
+    claims: &[Vec<F>],
+    proof: &Proof<F, H::Output>,
+    virtual_source: bool,
+    mut authenticate: impl FnMut(usize, usize, &Pair<F, H::Output>) -> Result<(), Error>,
+) -> Result<(), Error> {
     statements(pp, queries, claims)?;
     let count = queries.len();
-    if proof.consistency.len() != count
+    if sources.len() != count
+        || proof.consistency.len() != count
         || proof
             .consistency
             .iter()
@@ -234,13 +339,17 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
     let roots: Vec<Vec<_>> = proof
         .consistency
         .iter()
-        .map(|p| {
+        .zip(sources)
+        .map(|(p, source)| {
             std::iter::once(*source)
                 .chain(p.roots.iter().copied())
                 .collect()
         })
         .collect();
-    begin(t, pp, source, queries, claims, &roots);
+    if virtual_source {
+        t.append_message(b"packed PolyFRIM joint virtual sources v1", &());
+    }
+    begin(t, pp, binding, queries, claims, &roots);
     for (index, ((query, claim), consistency)) in queries
         .iter()
         .zip(claims)
@@ -248,7 +357,16 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
         .enumerate()
     {
         member(t, index);
-        super::super::verify::<F, H>(t, pp, source, query, claim, consistency)?;
+        super::super::verify_source::<F, H, _>(
+            t,
+            pp,
+            &sources[index],
+            query,
+            claim,
+            consistency,
+            virtual_source,
+            |position, pair| authenticate(index, position, pair),
+        )?;
     }
     let (weights, identifiers) = project::<F, H>(t, pp, &roots);
     let fri = rolling_fri::Parameters::new(pp.message, pp.blowup, pp.queries, pp.root)
@@ -267,7 +385,12 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
             let mut projected = [F::zero(); 2];
             for (query, root) in roots.iter().enumerate() {
                 let opening = &proof.packed[sample][query][layer];
-                if opening.values.len() != 2 * pp.width
+                if virtual_source && layer == 0 {
+                    if opening.values.len() != 2 * pp.width || !opening.path.is_empty() {
+                        return Err(rolling_fri::Error("joint virtual source shape"));
+                    }
+                    authenticate(query, index, opening).map_err(|e| rolling_fri::Error(e.0))?;
+                } else if opening.values.len() != 2 * pp.width
                     || opening.path.len() != depth + 1
                     || opening.path[0] != leaf::<F, H>(pp, layer, position, &opening.values)
                     || !MerkleTree::<H>::check(&root[layer], position, &opening.path)

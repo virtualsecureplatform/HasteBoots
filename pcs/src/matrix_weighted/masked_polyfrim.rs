@@ -4,7 +4,7 @@
 //! variables preserve logical shapes while providing explicit mask capacity.
 //! Multi-query calls enforce one private lifetime atomically; they currently
 //! contain individual direct openings. The explicit joint API shares original
-//! source proximity; query-specific masked ladders remain separate.
+//! source proximity; the separate aggregated API also shares query-ladder FRI.
 use crate::{
     matrix_weighted::Commitment, packed_polyfrim::authenticated::masked as core, utils::hash::Hash,
 };
@@ -20,6 +20,8 @@ use std::sync::{Mutex, MutexGuard};
 
 /// Explicit original-source-sharing batches; independent openings stay unchanged.
 pub mod joint;
+/// Explicit batches sharing source and query-ladder rolling proximity.
+pub mod aggregated;
 
 /// Invalid geometry, source, claim, private lifetime or rejected proof.
 #[derive(Debug, thiserror::Error)]

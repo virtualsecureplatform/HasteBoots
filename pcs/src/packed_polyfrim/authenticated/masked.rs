@@ -5,6 +5,9 @@
 #[cfg(test)]
 mod disclosure;
 
+/// Ordered batches with shared original-source and query-ladder proximity.
+pub mod aggregated;
+
 /// Ordered batches with one shared original-source proximity certificate.
 pub mod joint;
 
