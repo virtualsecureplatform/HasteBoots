@@ -36,7 +36,16 @@ where F:NTTField+Serialize+DeserializeOwned,EF:AbstractExtensionField<F>+Seriali
             assert_eq!(used,bytes.len());
             let mut verifier=Transcript::new_direct();
             deferred::verify::<F,EF,Sha256,_>(&mut verifier,&helper,&public,&requests,&proof).unwrap();
-            assert_eq!(prover.get_challenge(b"after deferred lookup"),verifier.get_challenge(b"after deferred lookup"));
+            let after=prover.get_challenge(b"after deferred lookup");
+            assert_eq!(after,verifier.get_challenge(b"after deferred lookup"));
+            if count==1 {
+                let mut measured=Transcript::new_direct();
+                let mut statistics=snarks::packed_extension_lookup::ProverStatistics::default();
+                let measured_proof=deferred::prove_with_statistics::<F,EF,Sha256,_>(
+                    &mut measured,&helper,&refs,&requests,&mut statistics).unwrap();
+                assert_eq!(bytes,bincode::serde::encode_to_vec(&measured_proof,bincode::config::standard()).unwrap());
+                assert_eq!(after,measured.get_challenge(b"after deferred lookup"));
+            }
             let reject=|requests:&[_],proof:&_| deferred::verify::<F,EF,Sha256,_>(&mut Transcript::new_direct(),&helper,&public,requests,proof).is_err();
             let mut bad=proof.clone();bad.source_authentication.openings.pop();assert!(reject(&requests,&bad));
             let mut bad=proof.clone();bad.lookups.pop();assert!(reject(&requests,&bad));

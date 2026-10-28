@@ -38,6 +38,14 @@ pub fn prove<F,EF,H,C>(parent:&mut Transcript<F>,helper:&Parameters<C>,
 where F:PrimeField+Serialize,EF:AbstractExtensionField<F>+Serialize,
       H:Hash+Send+Sync,C:RowCode<F>+Serialize,
 {
+    prove_with_statistics::<F,EF,H,C>(parent,helper,sources,requests,&mut ProverStatistics::default())
+}
+/// Prove deferred requests and accumulate algebra, helper and final source costs.
+pub fn prove_with_statistics<F,EF,H,C>(parent:&mut Transcript<F>,helper:&Parameters<C>,
+    sources:&[&ProverOracle<'_,F,H,C>],requests:&[Request<F>],statistics:&mut ProverStatistics)->Result<Proof<F,EF,H::Output>,Error>
+where F:PrimeField+Serialize,EF:AbstractExtensionField<F>+Serialize,
+      H:Hash+Send+Sync,C:RowCode<F>+Serialize,
+{
     preflight::<F,EF,H,C>(parent,helper,sources.len(),requests)?;
     let public:Vec<_>=sources.iter().map(|s|s.verifier()).collect();
     let mut batch=OpeningBatch::<F,H,C>::new(parent,&public).map_err(convert)?;
@@ -46,10 +54,12 @@ where F:PrimeField+Serialize,EF:AbstractExtensionField<F>+Serialize,
         let local:Vec<_>=request.source_slots.iter().map(|&i|sources[i]).collect();
         let witness:Vec<_>=local.iter().map(|s|s.table).collect();
         lookups.push(super::prove_inner::<F,EF,H,C>(parent,&request.config,helper,&local,&witness,
-            &mut ProverStatistics::default(),true,Some((&mut batch,&request.source_slots)))?);
+            statistics,true,Some((&mut batch,&request.source_slots)))?);
     }
     let states:Vec<_>=sources.iter().map(|s|s.state).collect();
+    let timer=std::time::Instant::now();
     let source_authentication=batch.prove(parent,&states).map_err(convert)?;
+    statistics.openings+=timer.elapsed();
     Ok(Proof {lookups,source_authentication})
 }
 /// Check lookup algebra and every derived source obligation using public roots.
