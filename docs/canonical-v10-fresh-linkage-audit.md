@@ -13,7 +13,7 @@ runs. The existing encrypted version-10 completeness fixtures remain separate.
 
 ## Cases and strict replay
 
-Each backend/field pair has an accepted control and eleven rejected cases:
+Each backend/field pair has an accepted control and fourteen rejected cases:
 
 - `Initial`: a different requested input body changes the public initial
   accumulator while the committed accumulator belongs to the original body.
@@ -41,11 +41,18 @@ Each backend/field pair has an accepted control and eleven rejected cases:
   key. All final-stage openings authenticate the requested radix-weighted
   switching key; extraction remains valid for the zero product.
 
+- `CanonicalA`, `CanonicalB` and `SwitchCanonical`: the committed digits encode
+  integer p for a source equal to field zero in either blind-rotation half or
+  final key switching. Reconstruction in the field and the initial zero borrow
+  hold. Every genuine digit/borrow lookup transition holds, while the final
+  borrow is one and must be rejected. All other PBS stage equations hold.
+
 Every certificate is serialized and decoded. Independent complete replay uses
-production NTT and decomposition verification. Test-only key-product, accumulator,
-monomial and final key-switch replay separately report both key products, linkage,
-public-factor and extraction identities while strictly authenticating every actual-root PCS
-opening and checking all other stage equations. Each attack fails only its
+production NTT and lookup verification. Test-only decomposition, key-product,
+accumulator, monomial and final key-switch replay separately report both key products, linkage,
+public-factor and extraction identities, plus each decomposition's reconstruction
+and initial/final zero-borrow identities, while strictly authenticating every
+actual-root PCS opening and checking all other stage equations. Each attack fails only its
 intended identity. Prover and replay finish with identical transcript challenges.
 Production accepts each control and rejects each attack at its intended stage.
 
@@ -56,10 +63,10 @@ no proof flag selects relaxed checks.
 ## Scope and remaining work
 
 The audit covers foreign bootstrapping-key and switching-key products, accumulator
-linkage, public rotations and final extraction. It does not replace fresh complete
-attacks at canonical comparison identities, nor an audit using secure encrypted
-original-size fixtures. Component attacks at those layers are already separate
-evidence, not a substitute for complete composition checks.
+linkage, public rotations, final extraction and noncanonical modulus digit strings.
+It does not replace fresh complete false-lookup certificates or an audit using
+secure encrypted original-size fixtures. Component attacks at those layers are
+already separate evidence, not a substitute for complete composition checks.
 
 The masked fixtures use one proximity query for completeness testing. General
 hiding, robust vector proximity, knowledge/Fiat-Shamir composition, genuine joint
@@ -67,7 +74,7 @@ aggregation and the original matched-security performance gates remain open.
 
 ## Running and evidence
 
-The two ordinary audit tests generate twenty-four certificates. The twenty-four
+The two ordinary audit tests generate thirty certificates. The thirty
 masked tests each generate one full certificate and are explicitly ignored by
 default because they require substantial CPU and memory. Run them manually:
 
@@ -76,14 +83,14 @@ RAYON_NUM_THREADS=8 cargo test --release --locked -p snarks --lib \
   packed_pbs::canonical::audit::masked_ -- --ignored --nocapture --test-threads=2
 ```
 
-The validation run used twenty-four concurrent audit workers on the available
-125-GiB host. Both backends and fields have one accepted control and eleven
-rejected attacks, for forty-eight fresh complete certificates overall: four controls
-accepted and forty-four attacks rejected. All strict child replay and final
+The validation run used thirty concurrent audit workers on the available
+125-GiB host. Both backends and fields have one accepted control and fourteen
+rejected attacks, for sixty fresh complete certificates overall: four controls
+accepted and fifty-six attacks rejected. All strict child replay and final
 transcript equality checks pass.
 
-Validation passes 62 default release/locked unit tests and all twenty-four manual
-masked audit tests, for 86 unique test cases. The locked workspace check passes.
+Validation passes 62 default release/locked unit tests and all thirty manual
+masked audit tests, for 92 unique test cases. The locked workspace check passes.
 The validated source snapshot, checked certificate records and logs are under
-`target/performance/v10-fresh-switch-key-audit/`. The earlier accumulator-only run
+`target/performance/v10-fresh-canonicity-audit/`. The earlier accumulator-only run
 remains archived under `target/performance/v10-fresh-linkage-audit/`.

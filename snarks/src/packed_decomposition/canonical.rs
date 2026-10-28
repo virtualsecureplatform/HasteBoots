@@ -242,3 +242,6 @@ where
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) mod audit;

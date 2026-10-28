@@ -7,10 +7,11 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
-Fresh complete v10 bootstrapping/switching-key product, linkage, rotation and extraction certificates pass strict child and
-actual-root replay on both backends and selected fields. Four controls are
-accepted and forty-four key-product/endpoint/addition/continuity/digit-view/rotation/extraction attacks are
-rejected after fresh proof construction. See `canonical-v10-fresh-linkage-audit.md`.
+Fresh complete v10 key-product, linkage, rotation, extraction and canonicity
+certificates pass strict child and actual-root replay on both backends and
+selected fields. Four controls are accepted and fifty-six attacks are rejected
+after fresh proof construction. These cover key products, endpoints, addition,
+continuity, digit views, rotation, extraction and noncanonical digit strings. See `canonical-v10-fresh-linkage-audit.md`.
 Other complete attack classes, secure encrypted/original-size audits, joint
 aggregation and security/performance promotion remain open.
 
@@ -25,45 +26,46 @@ The native final key-switch stage now composes canonical NTTs, original-key
 products, canonical negative-a digits and original output extraction. A fresh
 known-table opening binds the randomized public-input root that the verifier
 cannot deterministically recompute. See `canonical-packed-key-switch.md`.
-Complete masked PBS composition and the original security/performance gates
-remain open.
+This stage is integrated into complete version-10 proofs; the original
+security/performance gates remain open.
 
 Canonical radix decomposition now composes retained source/digit roots,
 canonical reconstruction/borrow-endpoint checks and extension-field transition
 lookups, with explicit trusted borrow/helper budgets across adjacent limbs. See
-`canonical-packed-decomposition.md`. Shared/deferred composition, final-stage
-integration and the original full security/performance gates remain open.
+`canonical-packed-decomposition.md`. Version 10 integrates this stage, including final key switching. Shared/deferred
+composition and the original full security/performance gates remain open.
 
 Extension-field rational lookups now expose canonical backend authentication
 for original sources and coefficient-packed reciprocal helpers, retaining the
 existing scalar extension algebra and base-field pullback maps. See
-`canonical-extension-lookups.md`. Shared/deferred comparison composition and
-complete masked PBS integration remain open.
+`canonical-extension-lookups.md`. Version 10 integrates the standalone comparisons. Shared/deferred comparison
+composition remains open.
 
 Public monomial products now have a canonical backend entry point, composing
 both original-source NTT links with the caller-derived public rotation identity.
 Derived roots retain one bounded session across NTT and terminal openings. See
-`canonical-packed-monomial.md`. Full masked PBS composition and the original
-security/performance gates remain open.
+`canonical-packed-monomial.md`. Version 10 integrates this stage; the original security/performance gates
+remain open.
 
 Accumulator linkage now dispatches through canonical backend sources while
 sharing the original endpoint, continuity and duplicated-half equations. Legacy
 callers retain their proof shape; masked callers authenticate ordered queries
 against retained source sessions. See `canonical-packed-accumulator.md`.
-Remaining PBS stages and full masked composition still need integration.
+Complete version-10 proofs now integrate this stage.
 
 Native bootstrapping/switching key owners and their complete-PBS setup wrapper
 now support statically selected canonical backends, retaining original source
 states and validating native layouts plus all logical parameter geometries.
 Public setup remains independent of proof bytes. See
-`canonical-native-key-setup.md`; masked complete-proof composition and the
-original security/performance gates remain open.
+`canonical-native-key-setup.md`. Complete version-10 proofs use these owners;
+the original security/performance gates remain open.
 
 Shared-challenge polynomial identities now expose canonical backend
 authentication through the source registry, with retained borrowed factors and
 individually checked terminal equations. Existing optimized Brakedown paths are
 preserved. See `canonical-shared-relations.md`. Masked child openings remain
-independent; genuine joint aggregation and complete-PBS integration remain open.
+independent. Version 10 integrates polynomial identities; genuine joint
+aggregation remains open.
 
 Single polynomial-relation authentication now has a canonical backend entry
 point. It borrows retained source tables, binds every ordered parameter context

@@ -19,6 +19,9 @@ enum Attack {
     ExtractionB,
     KeyProduct,
     SwitchKeyProduct,
+    CanonicalA,
+    CanonicalB,
+    SwitchCanonical,
 }
 impl Attack {
     fn accumulator_valid(self) -> bool {
@@ -30,6 +33,9 @@ impl Attack {
                 | Self::ExtractionB
                 | Self::KeyProduct
                 | Self::SwitchKeyProduct
+                | Self::CanonicalA
+                | Self::CanonicalB
+                | Self::SwitchCanonical
         )
     }
     fn monomial_valid(self) -> bool {
@@ -40,6 +46,8 @@ impl Attack {
     }
 }
 struct Report {
+    decomposition: [[bool; 3]; 2],
+    switch_decomposition: [bool; 3],
     key_product: bool,
     switch_key_product: bool,
     accumulator: bool,
@@ -117,11 +125,20 @@ where
             inputs[1].fill(F::one());
             co[d].fill(F::one());
         }
+        Attack::CanonicalA | Attack::CanonicalB => {
+            let half = usize::from(attack == Attack::CanonicalB);
+            let mut integer: u128 = F::MODULUS_VALUE.to_string().parse().unwrap();
+            for limb in 0..d {
+                co[half * d + limb].fill(F::from((integer & 255) as usize));
+                integer >>= 8;
+            }
+            assert_eq!(integer, 0);
+        }
         Attack::Rotation | Attack::KeyProduct | Attack::SwitchKeyProduct => {
             let p: u128 = F::MODULUS_VALUE.to_string().parse().unwrap();
             s.mask[0] = F::from((p / (4 * cfg.n as u128)) as usize);
         }
-        Attack::Control | Attack::ExtractionA | Attack::ExtractionB => {}
+        Attack::Control | Attack::ExtractionA | Attack::ExtractionB | Attack::SwitchCanonical => {}
     }
     if matches!(attack, Attack::KeyProduct | Attack::SwitchKeyProduct) {
         // Rotate only the first active round. The zero-key trace leaves its
@@ -291,7 +308,7 @@ where
         .collect();
     let decomposition = (0..2)
         .map(|h| {
-            decomp::canonical::prove::<F, EF, Sha256, P, _>(
+            decomp::canonical::audit::prove::<F, EF, Sha256, P, _>(
                 &mut trans,
                 &cfg.decomposition::<F>().unwrap(),
                 &input[h],
@@ -334,12 +351,26 @@ where
         &mut rng,
     )
     .unwrap();
-    let coefficients = final_stage::audit::zero_key_coefficients::<F, Sha256, P>(
+    let mut coefficients = final_stage::audit::zero_key_coefficients::<F, Sha256, P>(
         &pp.final_stage,
         &expected.ks,
         &final_acc,
     )
     .unwrap();
+    if attack == Attack::SwitchCanonical {
+        let mut integer: u128 = F::MODULUS_VALUE.to_string().parse().unwrap();
+        let count = coefficients.len() - 1;
+        for word in coefficients.iter_mut().take(count) {
+            *word = PackedTable::new(
+                pp.final_stage.coefficients.num_vars(),
+                width,
+                vec![F::from((integer & 31) as usize); 2 * cfg.n],
+            )
+            .unwrap();
+            integer >>= 5;
+        }
+        assert_eq!(integer, 0);
+    }
     let key_switch = final_stage::audit::prove_foreign::<F, EF, Sha256, P, _>(
         &mut trans,
         &pp.final_stage,
@@ -461,8 +492,9 @@ where
         ntt::verify_canonical::<F, H, P>(trans, &ntt_shape, &co[i], &ev[i], &proof.ntt[i])
             .map_err(convert)?;
     }
+    let mut decomposition_valid = [[true; 3]; 2];
     for half in 0..2 {
-        decomp::canonical::verify::<F, EF, H, P>(
+        decomposition_valid[half] = decomp::canonical::audit::verify::<F, EF, H, P>(
             trans,
             &cfg.decomposition::<F>()?,
             &input[half],
@@ -526,17 +558,20 @@ where
         &proof.monomial,
     )
     .map_err(convert)?;
-    let (switch_key_product_valid, extraction_valid) = final_stage::audit::verify::<F, EF, H, P>(
-        trans,
-        &pp.final_stage,
-        &setup.ks,
-        &proof.final_accumulator,
-        s.output_a,
-        s.output_b,
-        &proof.key_switch,
-    )
-    .map_err(convert)?;
+    let (switch_key_product_valid, extraction_valid, switch_decomposition_valid) =
+        final_stage::audit::verify::<F, EF, H, P>(
+            trans,
+            &pp.final_stage,
+            &setup.ks,
+            &proof.final_accumulator,
+            s.output_a,
+            s.output_b,
+            &proof.key_switch,
+        )
+        .map_err(convert)?;
     Ok(Report {
+        decomposition: decomposition_valid,
+        switch_decomposition: switch_decomposition_valid,
         key_product: key_product_valid,
         switch_key_product: switch_key_product_valid,
         accumulator: linkage_valid,
@@ -567,6 +602,18 @@ fn run<F, EF, P>(
     let report =
         reference_transcript::<F, EF, Sha256, P>(pp, &expected, &s.borrowed(), &proof, &mut replay)
             .unwrap();
+    assert_eq!(
+        report.decomposition[0],
+        [true, true, attack != Attack::CanonicalA]
+    );
+    assert_eq!(
+        report.decomposition[1],
+        [true, true, attack != Attack::CanonicalB]
+    );
+    assert_eq!(
+        report.switch_decomposition,
+        [true, true, attack != Attack::SwitchCanonical]
+    );
     assert_eq!(report.key_product, attack != Attack::KeyProduct);
     assert_eq!(
         report.switch_key_product,
@@ -585,6 +632,9 @@ fn run<F, EF, P>(
     } else {
         let err = result.unwrap_err();
         let label = match attack {
+            Attack::CanonicalA | Attack::CanonicalB | Attack::SwitchCanonical => {
+                "false canonical linear identity"
+            }
             Attack::KeyProduct | Attack::SwitchKeyProduct => "packed ZeroCheck terminal identity",
             Attack::Rotation => "packed public monomial product",
             Attack::ExtractionA | Attack::ExtractionB => "packed ZeroCheck terminal identity",
@@ -593,10 +643,12 @@ fn run<F, EF, P>(
         assert!(err.0.contains(label), "{attack:?}: {err}");
     }
     println!(
-        "HB_V10_FRESH_LINKAGE_CASE {{\"protocol_version\":10,\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_key_product_valid\":{},\"reference_switch_key_product_valid\":{},\"reference_linkage_valid\":{},\"reference_monomial_valid\":{},\"reference_extraction_valid\":{},\"production_accepted\":{},\"encrypted_profile\":false,\"original_size\":false}}",
+        "HB_V10_FRESH_LINKAGE_CASE {{\"protocol_version\":10,\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_decomposition_valid\":{:?},\"reference_switch_decomposition_valid\":{:?},\"reference_key_product_valid\":{},\"reference_switch_key_product_valid\":{},\"reference_linkage_valid\":{},\"reference_monomial_valid\":{},\"reference_extraction_valid\":{},\"production_accepted\":{},\"encrypted_profile\":false,\"original_size\":false}}",
         F::MODULUS_VALUE,
         backend,
         attack,
+        report.decomposition,
+        report.switch_decomposition,
         report.key_product,
         report.switch_key_product,
         report.accumulator,
@@ -661,6 +713,9 @@ where
         Attack::Rotation,
         Attack::ExtractionA,
         Attack::ExtractionB,
+        Attack::CanonicalA,
+        Attack::CanonicalB,
+        Attack::SwitchCanonical,
     ] {
         run::<F, EF, _>(&pp, &setup, attack, "brakedown");
     }
@@ -999,4 +1054,47 @@ masked_case!(
     algebra::GoldilocksExtension3,
     4,
     SwitchKeyProduct
+);
+
+masked_case!(
+    masked_babybear_canonical_a,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    CanonicalA
+);
+masked_case!(
+    masked_babybear_canonical_b,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    CanonicalB
+);
+masked_case!(
+    masked_babybear_switch_canonical,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    SwitchCanonical
+);
+masked_case!(
+    masked_goldilocks_canonical_a,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    CanonicalA
+);
+masked_case!(
+    masked_goldilocks_canonical_b,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    CanonicalB
+);
+masked_case!(
+    masked_goldilocks_switch_canonical,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    SwitchCanonical
 );

@@ -234,3 +234,6 @@ fn error(s: &str) -> Error {
 fn convert(e: impl std::fmt::Display) -> Error {
     Error(e.to_string())
 }
+
+#[cfg(test)]
+pub(crate) mod audit;

@@ -132,7 +132,7 @@ where
         commitment: &input_root,
         state: &input_state,
     };
-    let decomposition = packed_decomposition::canonical::prove::<F, EF, H, P, R>(
+    let decomposition = packed_decomposition::canonical::audit::prove::<F, EF, H, P, R>(
         trans,
         &cfg.decomposition::<F>()?,
         &source,
@@ -195,7 +195,7 @@ pub(crate) fn verify<F, EF, H, P>(
     a: &[F],
     b: F,
     proof: &Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>,
-) -> Result<(bool, bool), Error>
+) -> Result<(bool, bool, [bool; 3]), Error>
 where
     F: NTTField + Serialize,
     EF: AbstractExtensionField<F> + Serialize,
@@ -250,7 +250,7 @@ where
         &proof.product,
     )
     .map_err(convert)?;
-    packed_decomposition::canonical::verify::<F, EF, H, P>(
+    let decomposition_valid = packed_decomposition::canonical::audit::verify::<F, EF, H, P>(
         trans,
         &cfg.decomposition::<F>()?,
         &CanonicalVerifierOracle {
@@ -298,7 +298,7 @@ where
             &proof.extraction.opening,
         )
         .map_err(convert)?;
-    Ok((product_valid, valid))
+    Ok((product_valid, valid, decomposition_valid))
 }
 
 /// Genuine canonical negative-a digits with the zero-key product as final word.
