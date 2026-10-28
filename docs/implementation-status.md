@@ -7,13 +7,22 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Fresh complete invalid-borrow lookup certificates now cover both blind-rotation
+halves and final key switching in versions 10/11 over both fields and all three
+canonical backends. All 36 new forgeries reject at the terminal reciprocal
+identity while all other reported obligations hold. The prior sixty Brakedown
+certificate and transcript fingerprints remain exact. All 104 selected Rust
+tests pass. See `full-false-lookup-audit.md`. Broader lookup attacks, secure
+original-size adversarial validation and all original security, aggregation,
+hiding, performance and review gates remain open.
+
 Fresh complete binding audits now cover the joint-source backend in both
 versions 10 and 11 over both selected fields. All 60 new certificates pass
 strict actual-root/NTT replay: four controls accepted and 56 attacks rejected
 at the intended stages. Both transcript comparisons match, including a new
 32-byte check. All 80 default SNARK tests remain green. See
-`canonical-joint-fresh-binding-audit.md`. Fresh false-lookup composition cases,
-secure encrypted/original-size adversarial audits and independent review remain
+`canonical-joint-fresh-binding-audit.md`. The invalid-borrow full false-lookup family now has separate coverage;
+broader lookup attacks, secure encrypted/original-size audits and independent review remain
 open, along with the original security/performance and full aggregation gates.
 
 A distinct trusted joint-source canonical backend now composes complete version-

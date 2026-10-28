@@ -24,6 +24,9 @@ enum Attack {
     CanonicalA,
     CanonicalB,
     SwitchCanonical,
+    LookupA,
+    LookupB,
+    SwitchLookup,
 }
 impl Attack {
     fn accumulator_valid(self) -> bool {
@@ -38,6 +41,9 @@ impl Attack {
                 | Self::CanonicalA
                 | Self::CanonicalB
                 | Self::SwitchCanonical
+                | Self::LookupA
+                | Self::LookupB
+                | Self::SwitchLookup
         )
     }
     fn monomial_valid(self) -> bool {
@@ -50,6 +56,8 @@ impl Attack {
 struct Report {
     decomposition: [[bool; 3]; 2],
     switch_decomposition: [bool; 3],
+    lookups: [bool; 2],
+    switch_lookup: bool,
     key_product: bool,
     switch_key_product: bool,
     accumulator: bool,
@@ -141,7 +149,13 @@ where
             let p: u128 = F::MODULUS_VALUE.to_string().parse().unwrap();
             s.mask[0] = F::from((p / (4 * cfg.n as u128)) as usize);
         }
-        Attack::Control | Attack::ExtractionA | Attack::ExtractionB | Attack::SwitchCanonical => {}
+        Attack::Control
+        | Attack::ExtractionA
+        | Attack::ExtractionB
+        | Attack::SwitchCanonical
+        | Attack::LookupA
+        | Attack::LookupB
+        | Attack::SwitchLookup => {}
     }
     if matches!(attack, Attack::KeyProduct | Attack::SwitchKeyProduct) {
         // Rotate only the first active round. The zero-key trace leaves its
@@ -318,6 +332,12 @@ where
                 pp.borrows,
                 pp.helper,
                 &co[h * d..(h + 1) * d].iter().collect::<Vec<_>>(),
+                attack
+                    == if h == 0 {
+                        Attack::LookupA
+                    } else {
+                        Attack::LookupB
+                    },
                 &mut rng,
             )
             .unwrap()
@@ -385,6 +405,7 @@ where
         actual_body,
         &coefficients,
         attack == Attack::SwitchKeyProduct,
+        attack == Attack::SwitchLookup,
         &mut rng,
     )
     .unwrap();
@@ -509,8 +530,9 @@ where
             .map_err(convert)?;
     }
     let mut decomposition_valid = [[true; 3]; 2];
+    let mut lookup_valid = [true; 2];
     for half in 0..2 {
-        decomposition_valid[half] = D::audit_verify_decomposition(
+        let (linear, lookup) = D::audit_verify_decomposition(
             trans,
             &cfg.decomposition::<F>()?,
             &input[half],
@@ -525,6 +547,8 @@ where
                 .collect::<Vec<_>>(),
             &proof.decomposition[half],
         )?;
+        decomposition_valid[half] = linear;
+        lookup_valid[half] = lookup;
     }
     let ac: Vec<_> = proof
         .accumulators
@@ -573,19 +597,25 @@ where
         &proof.monomial,
     )
     .map_err(convert)?;
-    let (switch_key_product_valid, extraction_valid, switch_decomposition_valid) =
-        D::audit_verify_key_switch(
-            trans,
-            &pp.final_stage,
-            &setup.ks,
-            &proof.final_accumulator,
-            s.output_a,
-            s.output_b,
-            &proof.key_switch,
-        )?;
+    let (
+        switch_key_product_valid,
+        extraction_valid,
+        switch_decomposition_valid,
+        switch_lookup_valid,
+    ) = D::audit_verify_key_switch(
+        trans,
+        &pp.final_stage,
+        &setup.ks,
+        &proof.final_accumulator,
+        s.output_a,
+        s.output_b,
+        &proof.key_switch,
+    )?;
     Ok(Report {
         decomposition: decomposition_valid,
         switch_decomposition: switch_decomposition_valid,
+        lookups: lookup_valid,
+        switch_lookup: switch_lookup_valid,
         key_product: key_product_valid,
         switch_key_product: switch_key_product_valid,
         accumulator: linkage_valid,
@@ -639,6 +669,11 @@ fn run<F, EF, P, D>(
         report.switch_decomposition,
         [true, true, attack != Attack::SwitchCanonical]
     );
+    assert_eq!(
+        report.lookups,
+        [attack != Attack::LookupA, attack != Attack::LookupB]
+    );
+    assert_eq!(report.switch_lookup, attack != Attack::SwitchLookup);
     assert_eq!(report.key_product, attack != Attack::KeyProduct);
     assert_eq!(
         report.switch_key_product,
@@ -667,6 +702,9 @@ fn run<F, EF, P, D>(
             Attack::CanonicalA | Attack::CanonicalB | Attack::SwitchCanonical => {
                 "false canonical linear identity"
             }
+            Attack::LookupA | Attack::LookupB | Attack::SwitchLookup => {
+                "terminal reciprocal identity"
+            }
             Attack::KeyProduct | Attack::SwitchKeyProduct => "packed ZeroCheck terminal identity",
             Attack::Rotation => "packed public monomial product",
             Attack::ExtractionA | Attack::ExtractionB => "packed ZeroCheck terminal identity",
@@ -676,7 +714,7 @@ fn run<F, EF, P, D>(
         Some(err.0)
     };
     println!(
-        "{} {{\"protocol_version\":{},\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_decomposition_valid\":{:?},\"reference_switch_decomposition_valid\":{:?},\"reference_key_product_valid\":{},\"reference_switch_key_product_valid\":{},\"reference_linkage_valid\":{},\"reference_monomial_valid\":{},\"reference_extraction_valid\":{},\"production_accepted\":{},\"proof_bytes\":{},\"proof_sha256\":\"{:x}\",\"transcript_bytes\":\"{}\",\"production_error\":{},\"encrypted_profile\":false,\"original_size\":false}}",
+        "{} {{\"protocol_version\":{},\"prime\":{},\"backend\":\"{}\",\"attack\":\"{:?}\",\"reference_scope\":\"complete-strict-children-and-actual-root-openings\",\"reference_decomposition_valid\":{:?},\"reference_switch_decomposition_valid\":{:?},\"reference_lookup_valid\":{:?},\"reference_switch_lookup_valid\":{},\"reference_key_product_valid\":{},\"reference_switch_key_product_valid\":{},\"reference_linkage_valid\":{},\"reference_monomial_valid\":{},\"reference_extraction_valid\":{},\"production_accepted\":{},\"proof_bytes\":{},\"proof_sha256\":\"{:x}\",\"transcript_bytes\":\"{}\",\"production_error\":{},\"encrypted_profile\":false,\"original_size\":false}}",
         if D::VERSION == 10 {
             "HB_V10_FRESH_LINKAGE_CASE"
         } else {
@@ -688,6 +726,8 @@ fn run<F, EF, P, D>(
         attack,
         report.decomposition,
         report.switch_decomposition,
+        report.lookups,
+        report.switch_lookup,
         report.key_product,
         report.switch_key_product,
         report.accumulator,
@@ -772,6 +812,9 @@ where
         Attack::CanonicalA,
         Attack::CanonicalB,
         Attack::SwitchCanonical,
+        Attack::LookupA,
+        Attack::LookupB,
+        Attack::SwitchLookup,
     ] {
         run::<F, EF, _, D>(&pp, &setup, attack, "brakedown");
     }
@@ -1526,6 +1569,21 @@ macro_rules! joint_backend_cases {
             fn switch_canonical() {
                 joint_masked::<$f, $e, $mode>($width, Attack::SwitchCanonical);
             }
+            #[test]
+            #[ignore = "manual fresh complete false lookup; substantial CPU and memory"]
+            fn false_lookup_a() {
+                joint_masked::<$f, $e, $mode>($width, Attack::LookupA);
+            }
+            #[test]
+            #[ignore = "manual fresh complete false lookup; substantial CPU and memory"]
+            fn false_lookup_b() {
+                joint_masked::<$f, $e, $mode>($width, Attack::LookupB);
+            }
+            #[test]
+            #[ignore = "manual fresh complete false lookup; substantial CPU and memory"]
+            fn false_lookup_switch() {
+                joint_masked::<$f, $e, $mode>($width, Attack::SwitchLookup);
+            }
         }
     };
 }
@@ -1555,5 +1613,113 @@ joint_backend_cases!(
     algebra::Goldilocks,
     algebra::GoldilocksExtension3,
     4,
+    stages::Shared
+);
+
+masked_case!(
+    v10_masked_babybear_false_lookup_a,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    LookupA,
+    stages::PerLimb
+);
+
+masked_case!(
+    v10_masked_babybear_false_lookup_b,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    LookupB,
+    stages::PerLimb
+);
+
+masked_case!(
+    v10_masked_babybear_false_lookup_switch,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    SwitchLookup,
+    stages::PerLimb
+);
+
+masked_case!(
+    v10_masked_goldilocks_false_lookup_a,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    LookupA,
+    stages::PerLimb
+);
+
+masked_case!(
+    v10_masked_goldilocks_false_lookup_b,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    LookupB,
+    stages::PerLimb
+);
+
+masked_case!(
+    v10_masked_goldilocks_false_lookup_switch,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    SwitchLookup,
+    stages::PerLimb
+);
+
+masked_case!(
+    v11_masked_babybear_false_lookup_a,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    LookupA,
+    stages::Shared
+);
+
+masked_case!(
+    v11_masked_babybear_false_lookup_b,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    LookupB,
+    stages::Shared
+);
+
+masked_case!(
+    v11_masked_babybear_false_lookup_switch,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    SwitchLookup,
+    stages::Shared
+);
+
+masked_case!(
+    v11_masked_goldilocks_false_lookup_a,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    LookupA,
+    stages::Shared
+);
+
+masked_case!(
+    v11_masked_goldilocks_false_lookup_b,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    LookupB,
+    stages::Shared
+);
+
+masked_case!(
+    v11_masked_goldilocks_false_lookup_switch,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    SwitchLookup,
     stages::Shared
 );

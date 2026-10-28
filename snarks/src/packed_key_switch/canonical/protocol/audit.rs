@@ -11,6 +11,7 @@ pub(crate) fn prove_foreign<F, EF, H, P, R>(
     actual_b: F,
     coefficients: &[PackedTable<F>],
     foreign_key: bool,
+    false_lookup: bool,
     rng: &mut R,
 ) -> Result<Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>, Error>
 where
@@ -31,6 +32,7 @@ where
         actual_b,
         coefficients,
         foreign_key,
+        false_lookup,
         rng,
     )
 }
@@ -45,6 +47,7 @@ pub(crate) fn prove_shared<F, EF, H, P, R>(
     actual_b: F,
     coefficients: &[PackedTable<F>],
     foreign_key: bool,
+    false_lookup: bool,
     rng: &mut R,
 ) -> Result<shared::Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>, Error>
 where
@@ -65,6 +68,7 @@ where
         actual_b,
         coefficients,
         foreign_key,
+        false_lookup,
         rng,
     )
 }
@@ -79,6 +83,7 @@ fn prove_inner<F, EF, H, P, R, D>(
     actual_b: F,
     coefficients: &[PackedTable<F>],
     foreign_key: bool,
+    false_lookup: bool,
     rng: &mut R,
 ) -> Result<BackendProof<F, H::Output, P::SingleProof, P::BatchProof, D::Proof>, Error>
 where
@@ -209,6 +214,7 @@ where
         pp.borrows,
         pp.helper,
         &co[..d].iter().collect::<Vec<_>>(),
+        false_lookup,
         rng,
     )?;
     let (mask, target) = extraction_tables_dimensions(
@@ -264,7 +270,7 @@ pub(crate) fn verify<F, EF, H, P>(
     a: &[F],
     b: F,
     proof: &Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>,
-) -> Result<(bool, bool, [bool; 3]), Error>
+) -> Result<(bool, bool, [bool; 3], bool), Error>
 where
     F: NTTField + Serialize,
     EF: AbstractExtensionField<F> + Serialize,
@@ -281,7 +287,7 @@ pub(crate) fn verify_shared<F, EF, H, P>(
     a: &[F],
     b: F,
     proof: &shared::Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>,
-) -> Result<(bool, bool, [bool; 3]), Error>
+) -> Result<(bool, bool, [bool; 3], bool), Error>
 where
     F: NTTField + Serialize,
     EF: AbstractExtensionField<F> + Serialize,
@@ -298,7 +304,7 @@ fn verify_inner<F, EF, H, P, D>(
     a: &[F],
     b: F,
     proof: &BackendProof<F, H::Output, P::SingleProof, P::BatchProof, D::Proof>,
-) -> Result<(bool, bool, [bool; 3]), Error>
+) -> Result<(bool, bool, [bool; 3], bool), Error>
 where
     F: NTTField + Serialize,
     EF: AbstractExtensionField<F> + Serialize,
@@ -355,7 +361,7 @@ where
         &proof.product,
     )
     .map_err(convert)?;
-    let decomposition_valid = D::audit_verify(
+    let (decomposition_valid, lookup_valid) = D::audit_verify(
         trans,
         &cfg.decomposition::<F>()?,
         &CanonicalVerifierOracle {
@@ -402,7 +408,7 @@ where
             &proof.extraction.opening,
         )
         .map_err(convert)?;
-    Ok((product_valid, valid, decomposition_valid))
+    Ok((product_valid, valid, decomposition_valid, lookup_valid))
 }
 
 /// Genuine canonical negative-a digits with the zero-key product as final word.

@@ -17,6 +17,7 @@ where
         borrow: &P,
         helper: &P,
         digits: &[&CanonicalProverOracle<'_, F, H, P>],
+        false_lookup: bool,
         rng: &mut R,
     ) -> Result<Self::Decomposition, Error>;
     fn audit_verify_decomposition(
@@ -27,7 +28,7 @@ where
         helper: &P,
         digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
         proof: &Self::Decomposition,
-    ) -> Result<[bool; 3], Error>;
+    ) -> Result<([bool; 3], bool), Error>;
     fn audit_key_switch<R: Rng + CryptoRng>(
         trans: &mut Transcript<F>,
         pp: &final_stage::Parameters<'_, P>,
@@ -39,6 +40,7 @@ where
         actual_b: F,
         coefficients: &[PackedTable<F>],
         foreign_key: bool,
+        false_lookup: bool,
         rng: &mut R,
     ) -> Result<Self::KeySwitch, Error>;
     fn audit_verify_key_switch(
@@ -49,7 +51,7 @@ where
         a: &[F],
         b: F,
         proof: &Self::KeySwitch,
-    ) -> Result<(bool, bool, [bool; 3]), Error>;
+    ) -> Result<(bool, bool, [bool; 3], bool), Error>;
 }
 macro_rules! adapter {
     ($name:ident,$radix:ident,$key_prove:ident,$key_verify:ident) => {
@@ -67,10 +69,17 @@ macro_rules! adapter {
                 borrow: &P,
                 helper: &P,
                 digits: &[&CanonicalProverOracle<'_, F, H, P>],
+                false_lookup: bool,
                 rng: &mut R,
             ) -> Result<Self::Decomposition, Error> {
-                $radix::prove::<F, EF, H, P, R>(trans, cfg, source, borrow, helper, digits, rng)
-                    .map_err(convert)
+                if false_lookup {
+                    $radix::prove_false_lookup::<F, EF, H, P, R>(
+                        trans, cfg, source, borrow, helper, digits, rng,
+                    )
+                } else {
+                    $radix::prove::<F, EF, H, P, R>(trans, cfg, source, borrow, helper, digits, rng)
+                }
+                .map_err(convert)
             }
             fn audit_verify_decomposition(
                 trans: &mut Transcript<F>,
@@ -80,7 +89,7 @@ macro_rules! adapter {
                 helper: &P,
                 digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
                 proof: &Self::Decomposition,
-            ) -> Result<[bool; 3], Error> {
+            ) -> Result<([bool; 3], bool), Error> {
                 $radix::verify::<F, EF, H, P>(trans, cfg, source, borrow, helper, digits, proof)
                     .map_err(convert)
             }
@@ -95,6 +104,7 @@ macro_rules! adapter {
                 actual_b: F,
                 coefficients: &[PackedTable<F>],
                 foreign_key: bool,
+                false_lookup: bool,
                 rng: &mut R,
             ) -> Result<Self::KeySwitch, Error> {
                 key_audit::$key_prove::<F, EF, H, P, R>(
@@ -108,6 +118,7 @@ macro_rules! adapter {
                     actual_b,
                     coefficients,
                     foreign_key,
+                    false_lookup,
                     rng,
                 )
                 .map_err(convert)
@@ -120,7 +131,7 @@ macro_rules! adapter {
                 a: &[F],
                 b: F,
                 proof: &Self::KeySwitch,
-            ) -> Result<(bool, bool, [bool; 3]), Error> {
+            ) -> Result<(bool, bool, [bool; 3], bool), Error> {
                 key_audit::$key_verify::<F, EF, H, P>(trans, pp, key, acc, a, b, proof)
                     .map_err(convert)
             }

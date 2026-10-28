@@ -548,3 +548,6 @@ mod tests;
 
 /// Shared scalar challenges with canonical source sessions.
 pub mod shared;
+
+#[cfg(test)]
+pub(crate) mod audit;

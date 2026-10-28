@@ -116,3 +116,12 @@ final code/lock snapshots agree exactly, with documentation-only final changes.
 Per-certificate proof hashes, transcript fingerprints and production errors are
 in `checked-joint-records.json` and `checked-brakedown-records.json` beside the
 immutable raw logs and frozen executable.
+
+## False-lookup follow-up
+
+Fresh complete invalid-borrow lookup certificates now cover all three canonical
+backends, both versions and both fields, separately from the original fifteen
+binding cases per pair. Linear checks and unrelated obligations stay valid;
+production rejects the terminal reciprocal identity. There are now 144 opt-in
+masked cases. See `full-false-lookup-audit.md` for the new checked scope and
+remaining limits; the historical sixty-case results above are unchanged.

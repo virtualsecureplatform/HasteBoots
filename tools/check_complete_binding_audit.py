@@ -13,6 +13,7 @@ import re
 ATTACKS = {'Control', 'Initial', 'Final', 'Addition', 'Chain', 'DigitA', 'DigitB',
            'Rotation', 'ExtractionA', 'ExtractionB', 'KeyProduct', 'SwitchKeyProduct',
            'CanonicalA', 'CanonicalB', 'SwitchCanonical'}
+LOOKUP_ATTACKS = {'LookupA', 'LookupB', 'SwitchLookup'}
 PRIMES = {2013265921, 18446744069414584321}
 PREFIXES = {10: 'HB_V10_FRESH_LINKAGE_CASE ', 11: 'HB_V11_FRESH_BINDING_CASE '}
 
@@ -28,9 +29,12 @@ def parse(raw):
     return records
 
 
-def validate(records, backend, versions):
-    selected = [r for r in records if r['backend'] == backend and r['protocol_version'] in versions]
-    expected = {(v, p, a) for v in versions for p in PRIMES for a in ATTACKS}
+def validate(records, backend, versions, scope='binding'):
+    attacks = ATTACKS if scope == 'binding' else LOOKUP_ATTACKS if scope == 'false-lookups' else ATTACKS | LOOKUP_ATTACKS
+    candidates = [r for r in records if r['backend'] == backend and r['protocol_version'] in versions]
+    assert all(r['attack'] in ATTACKS | LOOKUP_ATTACKS for r in candidates), 'unknown attack class'
+    selected = [r for r in candidates if r['attack'] in attacks]
+    expected = {(v, p, a) for v in versions for p in PRIMES for a in attacks}
     seen = set()
     for r in selected:
         version, prime, attack = r['protocol_version'], r['prime'], r['attack']
@@ -49,6 +53,9 @@ def validate(records, backend, versions):
             'production_accepted': attack == 'Control',
             'encrypted_profile': False, 'original_size': False,
         }
+        if scope != 'binding' or 'reference_lookup_valid' in r:
+            checks['reference_lookup_valid'] = [attack != 'LookupA', attack != 'LookupB']
+            checks['reference_switch_lookup_valid'] = attack != 'SwitchLookup'
         def bool_shape(actual, wanted):
             if isinstance(wanted, list):
                 return isinstance(actual, list) and len(actual) == len(wanted) and all(
@@ -63,6 +70,7 @@ def validate(records, backend, versions):
             assert r['production_error'] is None
         else:
             label = ('false canonical linear identity' if attack in {'CanonicalA', 'CanonicalB', 'SwitchCanonical'}
+                     else 'terminal reciprocal identity' if attack in LOOKUP_ATTACKS
                      else 'packed ZeroCheck terminal identity' if attack in {'KeyProduct', 'SwitchKeyProduct', 'ExtractionA', 'ExtractionB'}
                      else 'packed public monomial product' if attack == 'Rotation'
                      else 'packed accumulator linkage')
@@ -76,13 +84,14 @@ def main():
     parser.add_argument('--log', type=Path, required=True)
     parser.add_argument('--backend', required=True)
     parser.add_argument('--versions', nargs='+', type=int, choices=[10, 11], default=[10, 11])
+    parser.add_argument('--scope', choices=['binding', 'false-lookups', 'all'], default='binding')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     raw = args.log.read_text()
     assert re.search(r'test result: ok\. \d+ passed; 0 failed;', raw), 'no successful Rust test completion'
     assert 'test result: FAILED.' not in raw and 'error: test failed' not in raw, 'Rust test failure in log'
-    records = validate(parse(raw), args.backend, set(args.versions))
-    result = {'backend': args.backend, 'versions': sorted(set(args.versions)),
+    records = validate(parse(raw), args.backend, set(args.versions), args.scope)
+    result = {'backend': args.backend, 'versions': sorted(set(args.versions)), 'scope': args.scope,
               'certificates': len(records), 'accepted_controls': sum(r['production_accepted'] for r in records),
               'rejected_attacks': sum(not r['production_accepted'] for r in records),
               'whole_security_certified': False, 'hiding_certified': False,

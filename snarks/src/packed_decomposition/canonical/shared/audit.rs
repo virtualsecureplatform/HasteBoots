@@ -16,6 +16,43 @@ where
     P: CanonicalPcs<F, H>,
     R: Rng + CryptoRng,
 {
+    prove_inner::<F, EF, H, P, R>(trans, config, source, borrow, helper, digits, rng, false)
+}
+pub(crate) fn prove_false_lookup<F, EF, H, P, R>(
+    trans: &mut Transcript<F>,
+    config: &Config,
+    source: &CanonicalProverOracle<'_, F, H, P>,
+    borrow: &P,
+    helper: &P,
+    digits: &[&CanonicalProverOracle<'_, F, H, P>],
+    rng: &mut R,
+) -> Result<Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>, Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    R: Rng + CryptoRng,
+{
+    prove_inner::<F, EF, H, P, R>(trans, config, source, borrow, helper, digits, rng, true)
+}
+fn prove_inner<F, EF, H, P, R>(
+    trans: &mut Transcript<F>,
+    config: &Config,
+    source: &CanonicalProverOracle<'_, F, H, P>,
+    borrow: &P,
+    helper: &P,
+    digits: &[&CanonicalProverOracle<'_, F, H, P>],
+    rng: &mut R,
+    false_lookup: bool,
+) -> Result<Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>, Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    R: Rng + CryptoRng,
+{
     let public: Vec<_> = digits.iter().map(|d| d.verifier()).collect();
     bind::<F, EF, H, P>(trans, config, &source.verifier(), borrow, helper, &public)?;
     let pp = source.parameters;
@@ -46,6 +83,11 @@ where
             borrows[i + 1][row] = field::<F>(carry)?;
         }
     }
+    let honest = false_lookup.then(|| borrows.clone());
+    if false_lookup {
+        assert!(d > 1);
+        borrows[1].fill(field::<F>(2)?);
+    }
     let (borrow_commitments, states): (Vec<_>, Vec<_>) = borrows
         .into_iter()
         .map(|v| {
@@ -75,14 +117,36 @@ where
         packed_linear::audit::prove::<F, H, P>(trans, &linear_sources, &relations::<F>(config)?)
             .map_err(convert)?;
     let registry: Vec<_> = digits.iter().copied().chain(borrows.iter()).collect();
-    let comparisons = comparisons::prove::<F, EF, H, P, R>(
-        trans,
-        helper,
-        &registry,
-        &comparison_requests::<F>(config)?,
-        rng,
-    )
-    .map_err(convert)?;
+    let comparisons = if false_lookup {
+        let mut witness: Vec<_> = digits.iter().map(|s| s.table().clone()).collect();
+        witness.extend(
+            honest
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|v| PackedTable::new(pp.num_vars(), pp.width(), v.clone()).map_err(convert))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        let tables: Vec<_> = witness.iter().collect();
+        comparisons::audit::prove::<F, EF, H, P, R>(
+            trans,
+            helper,
+            &registry,
+            &comparison_requests::<F>(config)?,
+            &tables,
+            rng,
+        )
+        .map_err(convert)?
+    } else {
+        comparisons::prove::<F, EF, H, P, R>(
+            trans,
+            helper,
+            &registry,
+            &comparison_requests::<F>(config)?,
+            rng,
+        )
+        .map_err(convert)?
+    };
     Ok(Proof {
         borrow_commitments,
         linear,
@@ -98,7 +162,7 @@ pub(crate) fn verify<F, EF, H, P>(
     helper: &P,
     digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
     proof: &Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>,
-) -> Result<[bool; 3], Error>
+) -> Result<([bool; 3], bool), Error>
 where
     F: PrimeField + Serialize,
     EF: AbstractExtensionField<F> + Serialize,
@@ -144,7 +208,7 @@ where
             commitment: s.commitment,
         })
         .collect();
-    comparisons::verify::<F, EF, H, P>(
+    let lookup_valid = comparisons::audit::verify::<F, EF, H, P>(
         trans,
         helper,
         &registry,
@@ -152,7 +216,10 @@ where
         &proof.comparisons,
     )
     .map_err(convert)?;
-    valid
-        .try_into()
-        .map_err(|_| error("audit linear identity count"))
+    Ok((
+        valid
+            .try_into()
+            .map_err(|_| error("audit linear identity count"))?,
+        lookup_valid,
+    ))
 }

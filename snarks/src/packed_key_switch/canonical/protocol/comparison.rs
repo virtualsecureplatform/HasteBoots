@@ -36,6 +36,7 @@ where
         borrow: &P,
         helper: &P,
         digits: &[&CanonicalProverOracle<'_, F, H, P>],
+        false_lookup: bool,
         rng: &mut R,
     ) -> Result<Self::Proof, Error>;
     #[cfg(test)]
@@ -47,7 +48,7 @@ where
         helper: &P,
         digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
         proof: &Self::Proof,
-    ) -> Result<[bool; 3], Error>;
+    ) -> Result<([bool; 3], bool), Error>;
 }
 macro_rules! backend {
     ($name:ident,$module:ident,$domain:expr) => {
@@ -98,11 +99,18 @@ macro_rules! backend {
                 borrow: &P,
                 helper: &P,
                 digits: &[&CanonicalProverOracle<'_, F, H, P>],
+                false_lookup: bool,
                 rng: &mut R,
             ) -> Result<Self::Proof, Error> {
-                $module::audit::prove::<F, EF, H, P, R>(
-                    trans, cfg, source, borrow, helper, digits, rng,
-                )
+                if false_lookup {
+                    $module::audit::prove_false_lookup::<F, EF, H, P, R>(
+                        trans, cfg, source, borrow, helper, digits, rng,
+                    )
+                } else {
+                    $module::audit::prove::<F, EF, H, P, R>(
+                        trans, cfg, source, borrow, helper, digits, rng,
+                    )
+                }
                 .map_err(convert)
             }
             #[cfg(test)]
@@ -114,7 +122,7 @@ macro_rules! backend {
                 helper: &P,
                 digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
                 proof: &Self::Proof,
-            ) -> Result<[bool; 3], Error> {
+            ) -> Result<([bool; 3], bool), Error> {
                 $module::audit::verify::<F, EF, H, P>(
                     trans, cfg, source, borrow, helper, digits, proof,
                 )
