@@ -91,7 +91,7 @@ where
     let (n, k) = geometry.unwrap();
     Ok((n, k, count))
 }
-fn child_shared<F: PrimeField + Serialize, EF: AbstractExtensionField<F>>(
+pub(super) fn child_shared<F: PrimeField + Serialize, EF: AbstractExtensionField<F>>(
     parent: &mut Transcript<F>,
     multiplicities: &[Vec<F>],
 ) -> Transcript<EF> {
@@ -99,7 +99,7 @@ fn child_shared<F: PrimeField + Serialize, EF: AbstractExtensionField<F>>(
     let flat: Vec<_> = multiplicities.iter().flatten().copied().collect();
     super::child(parent, &flat)
 }
-fn all_challenges<F: PrimeField, EF: AbstractExtensionField<F> + Serialize>(
+pub(super) fn all_challenges<F: PrimeField, EF: AbstractExtensionField<F> + Serialize>(
     child: &mut Transcript<EF>,
     requests: &[Request<F>],
 ) -> Vec<(usize, Challenge<EF>)> {
@@ -114,7 +114,7 @@ fn all_challenges<F: PrimeField, EF: AbstractExtensionField<F> + Serialize>(
         })
         .collect()
 }
-fn equation_infos<F: PrimeField>(requests: &[Request<F>], n: usize) -> Vec<PolynomialInfo> {
+pub(super) fn equation_infos<F: PrimeField>(requests: &[Request<F>], n: usize) -> Vec<PolynomialInfo> {
     requests
         .iter()
         .flat_map(|r| {

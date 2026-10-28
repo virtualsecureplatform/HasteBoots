@@ -545,3 +545,6 @@ where
 
 #[cfg(test)]
 mod tests;
+
+/// Shared scalar challenges with canonical source sessions.
+pub mod shared;

@@ -7,6 +7,12 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Canonical shared-query extension lookups now support retained masked and ordinary
+source sessions, independent batched scalar equations and one terminal query per
+used root. Aliased slots reuse a checked claim; unused slots spend no allowance.
+See `canonical-shared-lookups.md`. Canonical decomposition/PBS integration,
+genuine joint aggregation and the original security/performance gates remain open.
+
 Fresh complete v10 key-product, linkage, rotation, extraction and canonicity
 certificates pass strict child and actual-root replay on both backends and
 selected fields. Four controls are accepted and fifty-six attacks are rejected

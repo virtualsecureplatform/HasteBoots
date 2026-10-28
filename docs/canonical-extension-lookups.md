@@ -31,8 +31,9 @@ responses must already be canonical; the explicit extension sum and helper
 terminal scalars are canonicalized as well. This does not establish a canonical
 encoding theorem for all existing scalar sumcheck messages.
 
-This entry point is a standalone lookup component, not yet the shared/deferred
-comparison composition for a complete masked PBS proof. It retains public
+The standalone entry point is integrated into complete version-10 PBS. A new
+canonical shared-query component is documented in `canonical-shared-lookups.md`;
+its radix-decomposition and complete-PBS integration remain open. It retains public
 algebra and multiplicities and does not establish zero knowledge, robust vector
 proximity, genuine joint aggregation or whole-proof 128-bit security. Native
 security-matched size/latency gates and full PBS promotion remain open.
