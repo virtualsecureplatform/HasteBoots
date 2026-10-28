@@ -310,7 +310,7 @@ fn bind<F: PrimeField + Serialize>(
     Ok(())
 }
 
-fn check_round<F: Field>(width: usize, evaluations: &[F], expected: &[F]) -> Result<(), Error> {
+pub(crate) fn check_round<F: Field>(width: usize, evaluations: &[F], expected: &[F]) -> Result<(), Error> {
     for lane in 0..width {
         if evaluations[2 * lane] + evaluations[2 * lane + 1] != expected[lane] {
             return Err(reject("packed round inconsistent with claim"));

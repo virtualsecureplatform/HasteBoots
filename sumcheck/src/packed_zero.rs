@@ -19,6 +19,9 @@ use helper::{FiatShamirTranscript, Transcript};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+/// Independent relations with shared matrix challenges and terminal query.
+pub mod batch;
+
 /// Packed ZeroCheck proof, with one initial polynomial per equality point.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ZeroProof<F> {
@@ -95,65 +98,7 @@ where
     validate_tables(shape, factors)?;
     let points = sample_points(trans, shape);
     let equality: Vec<_> = points.iter().map(|p| equality_table(p)).collect();
-    let suffixes = 1usize << (shape.num_vars - 1);
-    let k = shape.width;
-    let cached = packed::constant_interpolations(factors, degree);
-    let first_flat = (0..suffixes)
-        .into_par_iter()
-        .fold(
-            || {
-                (
-                    vec![F::zero(); k * (degree + 1)],
-                    (0..factors.len())
-                        .map(|i| {
-                            cached[i]
-                                .clone()
-                                .unwrap_or_else(|| Vec::with_capacity(degree + 1))
-                        })
-                        .collect::<Vec<_>>(),
-                    DifferenceScratch::default(),
-                )
-            },
-            |(mut total, mut at, mut scratch), b| {
-                for (i, (table, out)) in factors.iter().zip(&mut at).enumerate() {
-                    if cached[i].is_some() {
-                        continue;
-                    }
-                    out.clear();
-                    for lane in 0..k {
-                        out.push(table.at(2 * b)[lane]);
-                        out.push(table.at(2 * b + 1)[lane]);
-                    }
-                    extrapolate(out, degree + 1, &mut scratch);
-                }
-                for node in 0..=degree {
-                    let mut value = F::zero();
-                    for (coefficient, indices) in &shape.terms {
-                        value += indices
-                            .iter()
-                            .fold(*coefficient, |value, &i| value * at[i][node]);
-                    }
-                    for lane in 0..k {
-                        total[lane * (degree + 1) + node] += equality[lane][b] * value;
-                    }
-                }
-                (total, at, scratch)
-            },
-        )
-        .map(|(total, _, _)| total)
-        .reduce(
-            || vec![F::zero(); k * (degree + 1)],
-            |mut a, b| {
-                for (a, b) in a.iter_mut().zip(b) {
-                    *a += b;
-                }
-                a
-            },
-        );
-    let first: Vec<_> = first_flat
-        .chunks_exact(degree + 1)
-        .map(|v| v.to_vec())
-        .collect();
+    let first = first_evaluations(shape, factors, degree, &equality);
     check_first(shape, degree, &first)?;
     let (pair, mixing, claim) = reduce(trans, shape, &first)?;
     after_challenge(trans, 0, &pair)?;
@@ -224,6 +169,73 @@ where
         expected: subclaim.expected,
         equality,
     })
+}
+
+fn first_evaluations<F: PrimeField>(
+    shape: &PackedShape<F>,
+    factors: &[PackedTable<F>],
+    degree: usize,
+    equality: &[Vec<F>],
+) -> Vec<Vec<F>> {
+    let suffixes = 1usize << (shape.num_vars - 1);
+    let k = shape.width;
+    let cached = packed::constant_interpolations(factors, degree);
+    let first_flat = (0..suffixes)
+        .into_par_iter()
+        .fold(
+            || {
+                (
+                    vec![F::zero(); k * (degree + 1)],
+                    (0..factors.len())
+                        .map(|i| {
+                            cached[i]
+                                .clone()
+                                .unwrap_or_else(|| Vec::with_capacity(degree + 1))
+                        })
+                        .collect::<Vec<_>>(),
+                    DifferenceScratch::default(),
+                )
+            },
+            |(mut total, mut at, mut scratch), b| {
+                for (i, (table, out)) in factors.iter().zip(&mut at).enumerate() {
+                    if cached[i].is_some() {
+                        continue;
+                    }
+                    out.clear();
+                    for lane in 0..k {
+                        out.push(table.at(2 * b)[lane]);
+                        out.push(table.at(2 * b + 1)[lane]);
+                    }
+                    extrapolate(out, degree + 1, &mut scratch);
+                }
+                for node in 0..=degree {
+                    let mut value = F::zero();
+                    for (coefficient, indices) in &shape.terms {
+                        value += indices
+                            .iter()
+                            .fold(*coefficient, |value, &i| value * at[i][node]);
+                    }
+                    for lane in 0..k {
+                        total[lane * (degree + 1) + node] += equality[lane][b] * value;
+                    }
+                }
+                (total, at, scratch)
+            },
+        )
+        .map(|(total, _, _)| total)
+        .reduce(
+            || vec![F::zero(); k * (degree + 1)],
+            |mut a, b| {
+                for (a, b) in a.iter_mut().zip(b) {
+                    *a += b;
+                }
+                a
+            },
+        );
+    first_flat
+        .chunks_exact(degree + 1)
+        .map(|v| v.to_vec())
+        .collect()
 }
 
 fn bind<F: PrimeField + Serialize>(
