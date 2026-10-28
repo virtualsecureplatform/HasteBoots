@@ -376,3 +376,6 @@ where
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
