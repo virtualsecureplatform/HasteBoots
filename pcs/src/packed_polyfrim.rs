@@ -85,15 +85,18 @@ impl<F: Field> Polynomial<F> {
             return Err(ShapeError("cannot fold constant polynomial"));
         }
         let mut coefficients = vec![F::zero(); self.coefficients.len() / 2];
+        let mut sum = vec![F::zero(); self.width];
         for (input, out) in self
             .coefficients
             .chunks_exact(2 * self.width)
             .zip(coefficients.chunks_exact_mut(self.width))
         {
             let (even, odd) = input.split_at(self.width);
+            for ((sum, &even), &odd) in sum.iter_mut().zip(even).zip(odd) {
+                *sum = even + odd;
+            }
             pair.zero.add_mul(even, out);
-            pair.one.add_mul(even, out);
-            pair.one.add_mul(odd, out);
+            pair.one.add_mul(&sum, out);
         }
         Ok(Self {
             width: self.width,
@@ -225,6 +228,50 @@ mod tests {
     fn ordered_padded_ladders_goldilocks() {
         audit::<Goldilocks>();
     }
+    fn extension_fold_reference<B: Field, E: algebra::AbstractExtensionField<B>>() {
+        for width in [1, 2, 4, 8] {
+            let value = |i: usize| E::from_base_fn(|j| scalar::<B>(i * (j + 1) + j + 1));
+            let pair = MatrixPair {
+                zero: Matrix::new(width, (0..width * width).map(|i| value(i + 7)).collect())
+                    .unwrap(),
+                one: Matrix::new(
+                    width,
+                    (0..width * width).map(|i| -value(3 * i + 11)).collect(),
+                )
+                .unwrap(),
+            };
+            for cells in [2, 4, 32] {
+                let polynomial = Polynomial {
+                    width,
+                    coefficients: (0..cells * width).map(|i| value(i * i + 13)).collect(),
+                };
+                let actual = polynomial.fold(&pair).unwrap();
+                let mut expected = vec![E::zero(); cells * width / 2];
+                for (input, out) in polynomial
+                    .coefficients
+                    .chunks_exact(2 * width)
+                    .zip(expected.chunks_exact_mut(width))
+                {
+                    let (even, odd) = input.split_at(width);
+                    // Independent original three-product equation, with every
+                    // extension coordinate populated in inputs and matrices.
+                    pair.zero.add_mul(even, out);
+                    pair.one.add_mul(even, out);
+                    pair.one.add_mul(odd, out);
+                }
+                assert_eq!(actual.coefficients, expected);
+            }
+        }
+    }
+    #[test]
+    fn babybear_extension_fold_matches_three_products() {
+        extension_fold_reference::<BabyBear, algebra::BabyBearExtension6>();
+    }
+    #[test]
+    fn goldilocks_extension_fold_matches_three_products() {
+        extension_fold_reference::<Goldilocks, algebra::GoldilocksExtension3>();
+    }
+
     #[test]
     fn matrix_order_is_observable() {
         type F = BabyBear;

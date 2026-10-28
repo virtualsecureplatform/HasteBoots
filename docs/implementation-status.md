@@ -7,6 +7,11 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Packed coefficient folds now use two matrix-vector products per coefficient
+pair instead of three, preserving the original verifier equation and matrix
+order. See `packed-fold-products.md` for tests and component timing. This does
+not close the original security or complete-PBS performance gates.
+
 Packed masked source and ladder encodings now use base-coordinate FFTs when
 their domain lies in the base field. Frozen controls preserve complete proof
 bytes and transcripts in both selected fields. See `packed-coordinate-encoder.md`.
