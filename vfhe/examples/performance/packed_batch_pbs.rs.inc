@@ -20,6 +20,8 @@ fn main() {
     let args:Vec<_>=std::env::args().collect();
     let full=args.iter().any(|s|s=="--full");
     let separate=args.iter().any(|s|s=="--separate");
+    let canonical=args.iter().any(|s|s=="--canonical-sources");
+    assert!(!(separate && canonical), "--canonical-sources requires a joint batch");
     let validation=args.iter().any(|s|s=="--validation-batches");
     let count=args.iter().position(|s|s=="--batch-size").map(|i|args[i+1].parse::<usize>().unwrap()).unwrap_or(1);
     assert!(count>0 && !(validation && args.iter().any(|s|s=="--batch-size")));
@@ -175,15 +177,20 @@ fn main() {
                 |proof:&Vec<pbs::DeferredProof<F,EF,[u8;32]>>| {assert_eq!(proof.len(),count);for i in 0..count {
                     pbs::verify_deferred::<F,EF,Sha256,_>(&pp,&verifier,&statements[i],&proof[i]).unwrap();
                 }},|proof:&Vec<pbs::DeferredProof<F,EF,[u8;32]>>|proof.iter().map(|m|snarks::packed_root_inventory::inventory(m).total()).collect::<Vec<_>>())
+        } else if canonical {
+            certificate!(pbs::batch::canonical::prove::<F,EF,Sha256,_>(&pp,&setup,&statements,&traces.iter().collect::<Vec<_>>()).unwrap(),
+                pbs::batch::canonical::Proof<F,EF,[u8;32]>,
+                |proof|pbs::batch::canonical::verify::<F,EF,Sha256,_>(&pp,&verifier,&statements,proof).unwrap(),
+                |proof:&pbs::batch::canonical::Proof<F,EF,[u8;32]>|proof.members.iter().map(|m|snarks::packed_root_inventory::inventory(m).total()).collect::<Vec<_>>())
         } else {
             certificate!(pbs::batch::prove::<F,EF,Sha256,_>(&pp,&setup,&statements,&traces.iter().collect::<Vec<_>>()).unwrap(),
                 pbs::batch::Proof<F,EF,[u8;32]>,
                 |proof|pbs::batch::verify::<F,EF,Sha256,_>(&pp,&verifier,&statements,proof).unwrap(),
                 |proof:&pbs::batch::Proof<F,EF,[u8;32]>|proof.members.iter().map(|m|snarks::packed_root_inventory::inventory(m).total()).collect::<Vec<_>>())
         };
-        let protocol_version=if separate {5} else {6};
-        let mode=if separate {"separate-v5"} else {"joint-hadamard"};
-        let transcript=if separate {pbs::DEFERRED_TRANSCRIPT_ID} else {pbs::batch::TRANSCRIPT_ID};
+        let protocol_version=if separate {5} else if canonical {7} else {6};
+        let mode=if separate {"separate-v5"} else if canonical {"canonical-sources"} else {"joint-hadamard"};
+        let transcript=if separate {pbs::DEFERRED_TRANSCRIPT_ID} else if canonical {pbs::batch::canonical::TRANSCRIPT_ID} else {pbs::batch::TRANSCRIPT_ID};
         let scope=if separate {"complete-serialized-independent-public-verifiers"} else {"complete-serialized-public-batch-verifier"};
         println!("HB_FULL_BATCH_PBS {{\"kind\":\"complete-binary-nand-pbs-batch\",\"field\":\"{FIELD}\",\"mode\":\"{mode}\",\"protocol_version\":{protocol_version},\"transcript\":\"{transcript}\",\"batch_size\":{count},\"full_parameters\":{full},\"verification_scope\":\"{scope}\",\"verified\":true,\"seed\":42,\"prime\":{},\"width\":{width},\"lookup_field_degree\":{},\"helper_left_extra\":{helper_left_extra},\"polynomial_size\":{},\"input_dimension\":{},\"output_dimension\":{},\"basis_bits\":{},\"key_switch_basis_bits\":{},\"lookup_repetitions\":1,\"setup_ns\":{setup_ns},\"trace_ns\":{trace_ns},\"prove_ns\":{prove_ns},\"serialization_ns\":{serialization_ns},\"complete_ns\":{complete_ns},\"deserialize_ns\":{deserialize_ns},\"verify_ns\":{verify_ns},\"proof_bytes\":{proof_bytes},\"proof_sha256\":\"{proof_sha256}\",\"statements_sha256\":\"{statements_sha256}\",\"fhe_parameters_sha256\":\"{fhe_parameters_sha256}\",\"native_keys_sha256\":\"{native_keys_sha256}\",\"whole_proof_security_certified\":false}}",
             F::MODULUS_VALUE,EF::D,params.ring_dimension(),params.lwe_dimension(),params.lwe_dimension(),params.blind_rotation_basis().bits(),params.key_switching_basis_bits());

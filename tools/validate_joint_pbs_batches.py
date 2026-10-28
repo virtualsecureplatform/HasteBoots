@@ -14,6 +14,7 @@ import re
 from full_pbs_budget import full_bounds,ROLES
 
 MODES={
+    'canonical-sources':(7,'merlin-direct-canonical-source-pbs-batch-v1','complete-serialized-public-batch-verifier'),
     'joint-hadamard':(6,'merlin-direct-joint-hadamard-pbs-batch-v1','complete-serialized-public-batch-verifier'),
     'separate-v5':(5,'merlin-direct-aggregated-hadamard-deferred-lookup-sources-v1','complete-serialized-independent-public-verifiers'),
 }
@@ -23,7 +24,8 @@ def conservative_errors(record,layouts):
     Individual ZeroCheck equations remain separate under shared fresh matrices.
     The old per-root PCS counts dominate the joint concatenated-word term/tail;
     retaining B extension cancellation terms also dominates the single joint
-    cancellation term. No independence between members is assumed.
+    cancellation term. Canonical aliases are checked for exact field equality
+    before weights; counting all original roots is conservative. No independence between members is assumed.
     """
     mode=record.get('mode');count=record.get('batch_size')
     if mode not in MODES or type(count) is not int or count<1:
