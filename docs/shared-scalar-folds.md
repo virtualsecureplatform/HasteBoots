@@ -33,10 +33,35 @@ six complete v8/v9 integration tests and two bounded decomposition fixtures.
 All 210 toy wire-controlled member instances retain archived bytes/hashes:
 84 standalone v5/v8 controls and 126 member instances across complete v6/v7/v9
 batch controls. A separate original-size repeat now requires exact pre-pooling
-v9 bytes/hashes as well as public verification at 1/4/16. That run is active
-under `target/performance/scalar-shared-fold-native/`; tests, source archives,
+v9 bytes/hashes as well as public verification at 1/4/16. All six certificates now verify, covering 42 fresh native member statements;
+all six complete proof bytes/hashes match the pre-pooling build exactly. Original
+FHE parameters, output keys, statements and all four PCS layouts also match.
+Observed process peaks are 27756288/75793588 KiB. This is correctness/resource evidence,
+not a paired latency or process-memory improvement claim. Evidence is under
+`target/performance/scalar-shared-fold-native/`; tests, source archives,
 binaries and wire-control evidence are recorded under `target/performance/scalar-shared-fold/`.
 
 This optimization adds no algebraic compression and does not close the existing
 Fiat–Shamir, hash, hiding, whole-security or promotion gates. Native v9 evidence
 from `comparison-batches-native/` uses the separately frozen pre-pooling build.
+
+## Parallel independent round messages
+
+The scalar batch now prepares borrowed arithmetic descriptions without `Rc`
+owners and computes independent round messages in parallel when at least 256
+Boolean pairs remain. Tiny tails stay sequential. Workers read immutable table
+views; the proving thread retains the source owners. The indexed collection keeps
+messages in caller order. Every message finishes before the complete vector is
+bound and the next common challenge is drawn. Individual recurrences and terminal
+obligations remain separate; no algebraic compression or wire metadata is added.
+
+The extended reference tests cover 54 byte-equal certificates / 378 equations
+across n=1/3/10, 1/4/16 equations and 1/4/16-worker pools over both selected fields.
+They include cubic products, cancelling terms, affine wrappers and distinct source
+objects with equal values. All 62 selected Rust tests pass, including fifty SNARK
+unit tests, six complete v8/v9 fixtures and two bounded decomposition fixtures.
+All 210 toy wire-controlled member instances retain archived bytes/hashes across
+v5–v9. A separate original-size exact-wire run is active under
+`target/performance/parallel-scalar-native/`; its source/binary/test evidence is
+under `target/performance/parallel-scalar-messages/`. Performance is not yet
+measured for this build.

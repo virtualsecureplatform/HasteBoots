@@ -7,15 +7,32 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Independent scalar round messages now run in parallel over immutable arithmetic
+metadata, with ordered collection before each common challenge. Four scalar tests
+include 54 byte-exact reference certificates / 378 equations over both fields and
+1/4/16-worker pools; all 62 selected Rust tests pass. All 210 toy wire-controlled
+member instances remain exact. Original-size exact-wire validation is running
+under `target/performance/parallel-scalar-native/`; parallel performance remains
+unmeasured. See `shared-scalar-folds.md`.
+
+Complete-v9 phase statistics and repeated single-proof benchmarking are now
+implemented with digest-linked phase/parent checks. All 96 Python checks and two
+complete timed/untimed byte-equality fixtures pass. Twelve archived toy packets
+remain exact and eight repeated single proofs verify. The clean sixteen-proof
+pooled experiment improves complete latency only 8.05–8.42% BabyBear /
+7.87–8.05% Goldilocks across reversed orders, below 10%. It measures the earlier
+sequential-message build. See `joint-pbs-phases.md`; full-security matching is open.
+
 Shared scalar sumcheck now borrows the first round and pools folded sources by
 immutable object identity. All four scalar-batch tests compare against independent
 per-equation behavior, including byte-exact reference proofs; all fifty SNARK
 unit tests pass. This removes redundant helper state copies/folds without merging
 equations or changing the wire protocol. All 62 selected Rust tests pass, including complete v8/v9 integration and
 bounded decomposition batches. All 210 toy wire-controlled member instances remain byte/hash exact across
-versions 5–9. Exact pooled native wire validation is running under
-`target/performance/scalar-shared-fold-native/`; paired performance measurements
-remain open; see `shared-scalar-folds.md`.
+versions 5–9. All six pooled native 1/4/16 certificates now verify, covering 42 fresh member
+statements, with exact pre-pooling proof bytes/hashes and archived fixtures
+matched under `target/performance/scalar-shared-fold-native/`. Paired performance
+measurement is separate; see `shared-scalar-folds.md`.
 
 Ten fresh complete-v9 helper-binding certificates now pass: two controls accepted
 and eight foreign-helper attacks rejected across both stages/member positions.
