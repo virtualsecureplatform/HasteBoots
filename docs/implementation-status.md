@@ -7,12 +7,23 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+The shared-query extension lookup frontend is implemented as
+`packed_extension_lookup::shared`: each reciprocal sum and identity is checked
+separately at a common scalar point, then two canonical multi-root packets
+authenticate all source/helper claims. All 21 targeted lookup tests and the VFHE
+check pass, including decoded 1/4/16 fixtures and six fresh foreign-source
+certificates (two controls accepted, four attacks rejected). Toy sixteen-request
+packets shrink from 457,932 to 312,223 bytes for BabyBear and from 219,441 to
+187,226 bytes for Goldilocks versus the deferred frontend. Complete PBS integration,
+bounded native groups, performance/security budgets and promotion remain open.
+See `shared-extension-lookups.md`.
+
 Shared scalar sumcheck batching is implemented as `sumcheck::batch`, with
 individually checked equations, mixed degrees and a common terminal point over
 full extension-field challenges. Twelve decoded fixtures cover 84 equations;
 all eleven selected sumcheck tests and 86 Python checks pass. This is a prerequisite
-for jointly scheduling reciprocal sums and constraints, not yet a lookup frontend
-or a complete PBS version. See `shared-scalar-sumcheck.md`.
+for jointly scheduling reciprocal sums and constraints; the new lookup frontend
+uses it, while complete PBS integration remains unfinished. See `shared-scalar-sumcheck.md`.
 
 Shared-challenge ZeroCheck now pools folded buffers by immutable source-object
 identity. A shared public-key factor folds once per round, while every relation
@@ -28,16 +39,17 @@ are unmeasured. See `packed-borrowed-batches.md`.
 Complete v6/v7 batch proving now borrows retained source tables instead of
 cloning every Hadamard factor into a second buffer. At native batch size sixteen,
 this removes 2.125/8.25 GiB of requested field-buffer storage for BabyBear and
-Goldilocks, respectively; process peak RSS and complete latency are not yet
-measured. Eighteen targeted release tests pass, including owned/borrowed proof
+Goldilocks, respectively; paired performance gates remain open. Native
+correctness sessions observe process peaks of 27,135,584/70,792,920 KiB, with no
+comparative latency claim. Eighteen targeted release tests pass, including owned/borrowed proof
 and transcript equivalence and forty reconstructed complete v6/v7 certificates.
 Twelve frozen-binary complete wire controls (84 fresh member instances) match
 all earlier v6/v7 proof bytes and hashes exactly. See `packed-borrowed-batches.md`.
 The original-size frozen v7 owning build has
 completed all six certificates covering 42 fresh statements across both fields,
-with all archived fixtures matched. Borrowed-build native validation is now running,
-and shared-fold native validation is queued behind it. These frozen owning-build
-results do not validate the newer implementations.
+with all archived fixtures matched. Borrowed-build native validation also completes
+all six certificates and 42 statements with exact owning-build proof bytes/hashes.
+Shared-fold native validation is now running; those results remain separate.
 
 Opt-in complete outer version 7 now deduplicates repeated canonical Hadamard
 roots under a common query. Every member retains version 6 constraints and every

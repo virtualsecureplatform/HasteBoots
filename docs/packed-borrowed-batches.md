@@ -65,6 +65,18 @@ Twelve complete frozen-binary wire controls (84 fresh member instances) also
 match every earlier borrowed-build v6/v7 proof byte and hash exactly, including
 all 1/4/16 groups, archived statements, keys, FHE parameters and PCS layouts.
 
-The original-size v7 validation under `target/performance/canonical-pbs-native/`
-uses the earlier frozen owning build. Its results must not be reported as native
-validation or memory measurements of this borrowed implementation.
+Original-size borrowed v7 validation now completes all six 1/4/16 certificates
+covering 42 fresh statements in `target/performance/borrowed-pbs-native/`. All six
+serialized proof byte counts and hashes match the earlier frozen owning build
+under `target/performance/canonical-pbs-native/`; archived statements, keys,
+FHE parameters and layouts match too. Conditional interactive inventories are
+unchanged, with 129.32427 bits for the union of 42 statements, excluding complete
+Fiat–Shamir/hash/composition security.
+
+Observed process peak RSS is 27,135,584/70,792,920 KiB for BabyBear/Goldilocks in
+these borrowed-build correctness sessions, compared with
+28,933,600/79,031,708 KiB in the owning-build sessions. These are process
+observations from one serial 1/4/16 run per field. Compilation overlapped the
+sessions, so they do not establish a comparative latency result or close the
+broader performance gates. The later shared-fold native validation is now running
+and must be assessed separately.

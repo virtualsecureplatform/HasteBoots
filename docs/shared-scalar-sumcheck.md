@@ -34,9 +34,10 @@ two, permitting one canonical multi-root authentication packet per parameter
 context. The verifier must derive both equations from the same authenticated
 helper value; independent unauthenticated values would not suffice.
 
-That lookup frontend, retained comparison witnesses, memory-bounded grouping and
-complete PBS integration are not implemented by this component. They remain
-required plan items. No complete proof size or speed claim follows from these
+The lookup frontend is now implemented separately in
+`packed_extension_lookup::shared`; see `shared-extension-lookups.md`. Retained
+comparison witnesses, memory-bounded grouping and complete PBS integration
+remain required plan items. No complete proof size or speed claim follows from these
 unit tests.
 
 ## Evidence
