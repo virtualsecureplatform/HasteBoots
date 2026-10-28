@@ -30,6 +30,10 @@ class JointBatchTests(unittest.TestCase):
             result=validate(encode(layouts,packets,members,inventories),'goldilocks',mode=mode,
                 reference_text='\n'.join(['HB_FULL_PCS '+json.dumps(r) for r in layouts]+['HB_FULL_PBS '+json.dumps(r) for r in old]))
             self.assertEqual(result['batch_sizes'],[1,4,16]);self.assertFalse(result['whole_proof_security_certified'])
+            if mode=='separate-v5':self.assertEqual(result['scope'],'independent standalone v5 PBS proofs')
+            else:
+                self.assertIn('complete cross-statement Hadamard authentication',result['scope'])
+                self.assertEqual('canonical source deduplication' in result['scope'],mode=='canonical-sources')
             layout={p['role']:p for p in layouts}
             native=dict(old[0],protocol_version=5,transcript=MODES['separate-v5'][1],lookup_backend='deferred-extension',hadamard_backend='multi-root')
             single=full_bounds(native,layout)

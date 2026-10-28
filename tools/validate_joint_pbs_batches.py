@@ -101,7 +101,9 @@ def validate(text,field,full=True,mode='joint-hadamard',reference_text=None):
     result=dict(field=field,mode=mode,full_parameters=full,batch_sizes=[1,4,16],packets=packets,
         members=members,layouts=layouts,inventories=inventories,
         conditional_21_member_interactive_bits=-math.log2(float(union)),
-        scope=('complete cross-statement Hadamard authentication with per-member remaining PBS constraints' if mode=='joint-hadamard' else 'independent standalone v5 PBS proofs'),
+        scope=('independent standalone v5 PBS proofs' if mode=='separate-v5' else
+               'complete cross-statement Hadamard authentication with per-member remaining PBS constraints'
+               + (' and canonical source deduplication' if mode=='canonical-sources' else '')),
         whole_proof_security_certified=False)
     if reference_text is not None:
         refs=[json.loads(s.split(' ',1)[1]) for s in reference_text.splitlines() if s.startswith('HB_FULL_PBS ')]
