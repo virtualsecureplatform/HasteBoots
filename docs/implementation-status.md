@@ -7,6 +7,13 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Eight isolated 128-query synthetic openings now measure transient caches at the
+original native key-source dimensions. After-commit RSS drops by about 384 MiB
+per owner in both fields, with exact proof/root/transcript fingerprints across
+both cache policies and repetitions. Single-source peak RSS is unchanged and
+regeneration increases proving time. See `native-source-cache-profile.md`.
+Original-size masked native-key setup and complete PBS remain unmeasured.
+
 Masked source owners now support an opt-in transient encoded-codeword cache.
 It regenerates the identical oracle once per batch and releases it afterward,
 reducing idle retained allocations at the cost of extra FFT work. Retained and
