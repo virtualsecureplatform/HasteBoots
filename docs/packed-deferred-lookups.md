@@ -22,11 +22,12 @@ remain in place. There is exactly one outer comparison packet, containing all d
 lookup proofs and final source authentication. Existing decomposition backends
 retain one packet per limb and their original transcript ordering.
 
-Both APIs are experimental and non-hiding. Deferred authentication requires the
+Complete PBS can select these APIs explicitly through protocol version 5; see
+`packed-deferred-pbs.md`. Both component APIs are experimental and non-hiding.
+Deferred authentication requires the
 same fixed-source-word assumptions as the underlying PCS and an analysis of the
 composed transcript. Tests do not establish a Fiat-Shamir or 128-bit whole-proof
-security certificate. Complete PBS integration, cross-statement aggregation and
-promotion remain pending.
+security certificate. Cross-statement aggregation and promotion remain pending.
 
 Validation covers BabyBear degree 6/width 8 and Goldilocks degree 3/width 4
 canonical decomposition with full and partial domains, zero and p-1 endpoints,

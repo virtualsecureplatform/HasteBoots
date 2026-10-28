@@ -6,6 +6,8 @@ frontend. Extension-field canonical comparisons and every other complete PBS
 stage, including key-switch product authentication, keep their existing backend.
 This aggregates factor authentication within one PBS, not multiple PBS statements.
 Versions 2 and 3 and their defaults remain available and unchanged.
+Version 5 additionally shares lookup source authentication across canonical
+limbs; see `packed-deferred-pbs.md` for its separate API and measurements.
 
 ## API and binding
 
