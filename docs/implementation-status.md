@@ -7,6 +7,18 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Version 9 now composes shared comparisons across complete PBS statements with
+mandatory outer Hadamard, blind-rotation and key-switch packets. Ten selected
+release tests pass, including 52 decoded v9 members over both fields. Its trusted
+grouping, ownership and remaining validation gates are documented in
+`packed-comparison-batches.md`. Native validation and whole-v9 security accounting
+remain open.
+
+Paired native v5/v8 timing completed sixteen decoded proofs in two execution
+orders without overlapping builds/tests. Complete latency improves only
+1.72–2.05% on BabyBear and 2.43–3.36% on Goldilocks, below the 10% gate.
+See `shared-pbs-timing.md`; these profiles are not whole-security matched.
+
 Streamed canonical decomposition batches now share comparisons across trusted
 groups of at most four independent members. Reconstruction/endpoints remain
 individual, while borrow states move into a group owner and are released after
@@ -14,7 +26,7 @@ its comparisons. Decoded 1/4/5/16 tests pass over both selected fields, with mix
 radices, repetitions and logical prefixes. Six reconstructed batch certificates
 pass (two controls accepted, four noncanonical-digit attacks rejected), as do
 seventeen targeted Rust tests and all 84 current v5/v8 wire controls. This is a
-component for complete cross-statement PBS integration, which remains unfinished.
+component now used by the experimental complete version-9 composition.
 See `batched-decompositions.md`.
 
 Complete opt-in version 8 now uses shared-query comparisons in both
@@ -26,9 +38,9 @@ and twenty reconstructed malicious/control certificates. Frozen toy runs verify
 archived statements, keys, FHE parameters and layouts. Aggregate toy bytes fall
 1.56%/2.31% versus v5. Original-size validation now passes all 42 fresh statements
 with archived fixtures matched. Native total bytes fall 7.24%/22.57% versus v5;
-paired timing and whole-security gates remain open. This is within-proof
-sharing, not yet cross-statement comparison aggregation or whole-security/
-performance promotion. See `packed-shared-pbs.md`.
+paired timing misses the 10% gate and whole-security gates remain open.
+Version 8 uses within-proof sharing; version 9 adds cross-statement comparison
+aggregation without claiming whole-security/performance promotion. See `packed-shared-pbs.md`.
 
 The shared-query extension lookup frontend is implemented as
 `packed_extension_lookup::shared`: each reciprocal sum and identity is checked
@@ -38,8 +50,9 @@ check pass, including decoded 1/4/16 fixtures and six fresh foreign-source
 certificates (two controls accepted, four attacks rejected). Toy sixteen-request
 packets shrink from 457,932 to 312,223 bytes for BabyBear and from 219,441 to
 187,226 bytes for Goldilocks versus the deferred frontend. Version 8 now composes
-it within a complete single-PBS proof; cross-statement composition, bounded native
-groups, complete security budgets and promotion remain open.
+it within a complete single-PBS proof; version 9 now adds cross-statement
+composition. Bounded native v9 runs, complete security budgets and promotion
+remain open.
 See `shared-extension-lookups.md`.
 
 Shared scalar sumcheck batching is implemented as `sumcheck::batch`, with
@@ -48,7 +61,8 @@ full extension-field challenges. Twelve decoded fixtures cover 84 equations;
 all eleven selected sumcheck tests and 86 Python checks pass. This is a prerequisite
 for jointly scheduling reciprocal sums and constraints; the new lookup frontend
 uses it, and version 8 composes it within individual PBS proofs. Cross-statement
-comparison sharing remains unfinished. See `shared-scalar-sumcheck.md`.
+comparison sharing is now composed experimentally in version 9; native validation
+and complete security remain open. See `shared-scalar-sumcheck.md`.
 
 Shared-challenge ZeroCheck now pools folded buffers by immutable source-object
 identity. A shared public-key factor folds once per round, while every relation
