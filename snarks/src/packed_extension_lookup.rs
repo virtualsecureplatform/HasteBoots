@@ -6,6 +6,11 @@
 //! source is committed. This component has no whole-proof security certificate.
 /// Same phase counters used by the lane backend; not serialized or transcript data.
 pub use crate::packed_lane_lookup::ProverStatistics;
+use crate::packed_opening_batch::OpeningBatch;
+
+/// Lookup groups sharing deferred authentication of canonical sources.
+pub mod deferred;
+
 use crate::{
     packed_extension as bridge,
     packed_oracle::{ProverOracle, VerifierOracle},
@@ -111,6 +116,24 @@ fn prove_impl<F, EF, H, C>(
     witness: &[&PackedTable<F>],
     statistics: &mut ProverStatistics,
     strict: bool,
+) -> Result<Proof<F, EF, H::Output>, Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    C: RowCode<F> + Serialize,
+{
+    prove_inner::<F,EF,H,C>(parent,config,helper,sources,witness,statistics,strict,None)
+}
+fn prove_inner<F, EF, H, C>(
+    parent: &mut Transcript<F>,
+    config: &Config<F>,
+    helper: &Parameters<C>,
+    sources: &[&ProverOracle<'_, F, H, C>],
+    witness: &[&PackedTable<F>],
+    statistics: &mut ProverStatistics,
+    strict: bool,
+    deferred: Option<(&mut OpeningBatch<'_,F,H,C>, &[usize])>,
 ) -> Result<Proof<F, EF, H::Output>, Error>
 where
     F: PrimeField + Serialize,
@@ -319,7 +342,16 @@ where
             )
             .map_err(convert)?;
     }
-    let source_openings = sources
+    let source_openings = if let Some((batch,slots))=deferred {
+        if slots.len()!=sources.len() {return Err(error("deferred source slot count"));}
+        for j in 0..sources.len() {
+            for (query,group) in source_queries.iter().zip(&groups) {
+                batch.push(parent,slots[j],query.clone(),group.source_values[j].clone()).map_err(convert)?;
+            }
+        }
+        Vec::new()
+    } else {
+        sources
         .iter()
         .enumerate()
         .map(|(j, s)| {
@@ -336,7 +368,8 @@ where
                 )
                 .map_err(convert)
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()?
+    };
     statistics.openings += timer.elapsed();
     Ok(Proof {
         multiplicities,
@@ -375,12 +408,29 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
+    verify_inner::<F,EF,H,C>(parent,config,helper,sources,proof,strict,None)
+}
+fn verify_inner<F, EF, H, C>(
+    parent: &mut Transcript<F>,
+    config: &Config<F>,
+    helper: &Parameters<C>,
+    sources: &[VerifierOracle<'_, H::Output, C>],
+    proof: &Proof<F, EF, H::Output>,
+    strict: bool,
+    deferred: Option<(&mut OpeningBatch<'_,F,H,C>, &[usize])>,
+) -> Result<(), Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    C: RowCode<F> + Serialize,
+{
     let (n, k) = bind::<F, EF, H, C>(parent, config, helper, sources)?;
     let count = config.repetitions();
     if proof.multiplicities.len() != config.table().len()
         || proof.groups.len() != count
         || proof.reciprocal_commitments.len() != count
-        || proof.source_openings.len() != sources.len()
+        || (if deferred.is_some() { !proof.source_openings.is_empty() } else { proof.source_openings.len() != sources.len() })
         || proof.groups.iter().any(|g| {
             g.source_values.len() != sources.len() || g.source_values.iter().any(|v| v.len() != k)
         })
@@ -466,6 +516,14 @@ where
             )
             .map_err(convert)?;
     }
+    if let Some((batch,slots))=deferred {
+        if slots.len()!=sources.len() {return Err(error("deferred source slot count"));}
+        for j in 0..sources.len() {
+            for (query,group) in queries.iter().zip(&proof.groups) {
+                batch.push(parent,slots[j],query.clone(),group.source_values[j].clone()).map_err(convert)?;
+            }
+        }
+    } else {
     for (j, (source, opening)) in sources.iter().zip(&proof.source_openings).enumerate() {
         source
             .parameters
@@ -481,6 +539,7 @@ where
                 opening,
             )
             .map_err(convert)?;
+    }
     }
     Ok(())
 }
