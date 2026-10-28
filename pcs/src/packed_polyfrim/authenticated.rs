@@ -14,6 +14,7 @@ use crate::{
 use algebra::{AbstractExtensionField, Field, matrix_weighted::MatrixPair};
 use helper::{FiatShamirTranscript, Transcript};
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 /// Invalid shape, mismatched state or rejected consistency certificate.
 #[derive(Debug, thiserror::Error)]
@@ -104,15 +105,30 @@ impl<F: Field + Serialize> Parameters<F> {
 /// Prover-only source polynomial and packed oracle. Never serialized as a proof.
 pub struct State<F, H: Hash + Send + Sync> {
     polynomial: Polynomial<F>,
-    values: Vec<F>,
+    values: OnceLock<Vec<F>>,
+    encoding: Parameters<F>,
     tree: MerkleTree<H>,
     context: H::Output,
     layer: usize,
 }
 impl<F, H: Hash + Send + Sync> State<F, H> {
+    /// Number of encoded field elements currently retained in the source cache.
+    pub fn cached_codeword_elements(&self) -> usize {
+        self.values.get().map_or(0, Vec::len)
+    }
+    fn evict_values(&mut self) {
+        self.values.take();
+    }
     /// Extract the expected public root, without private oracle values.
     pub fn root(&self) -> H::Output {
         self.tree.root
+    }
+}
+
+impl<F: Field + Serialize, H: Hash + Send + Sync> State<F, H> {
+    fn values(&self) -> &[F] {
+        self.values
+            .get_or_init(|| encode_values(&self.encoding, self.layer, &self.polynomial))
     }
 }
 
@@ -148,6 +164,29 @@ fn state<F: Field + Serialize, H: Hash + Send + Sync>(
     layer: usize,
     polynomial: Polynomial<F>,
 ) -> State<F, H> {
+    let values = encode_values(pp, layer, &polynomial);
+    let mut tree = MerkleTree::<H>::new();
+    let leaves: Vec<_> = values
+        .chunks_exact(2 * pp.width)
+        .enumerate()
+        .map(|(i, v)| leaf::<F, H>(pp, layer, i, v))
+        .collect();
+    tree.generate(&leaves);
+    State {
+        polynomial,
+        values: OnceLock::from(values),
+        encoding: pp.clone(),
+        tree,
+        context: hash::<H, _>(&(b"packed PolyFRIM parameters v2", pp)),
+        layer,
+    }
+}
+
+fn encode_values<F: Field + Serialize>(
+    pp: &Parameters<F>,
+    layer: usize,
+    polynomial: &Polynomial<F>,
+) -> Vec<F> {
     let n = pp.len(layer);
     let mut values = vec![F::zero(); n * pp.width];
     for lane in 0..pp.width {
@@ -164,20 +203,7 @@ fn state<F: Field + Serialize, H: Hash + Send + Sync>(
     for value in &mut values {
         *value = value.canonicalized();
     }
-    let mut tree = MerkleTree::<H>::new();
-    let leaves: Vec<_> = values
-        .chunks_exact(2 * pp.width)
-        .enumerate()
-        .map(|(i, v)| leaf::<F, H>(pp, layer, i, v))
-        .collect();
-    tree.generate(&leaves);
-    State {
-        polynomial,
-        values,
-        tree,
-        context: hash::<H, _>(&(b"packed PolyFRIM parameters v2", pp)),
-        layer,
-    }
+    values
 }
 
 /// Prove sampled public-matrix transitions against a retained source root.
@@ -255,7 +281,7 @@ fn certificate_traced<F: Field + Serialize, H: Hash + Send + Sync>(
                 .map(|(layer, state)| {
                     let pair = (index >> layer) / 2;
                     Pair {
-                        values: state.values[pair * 2 * pp.width..(pair + 1) * 2 * pp.width]
+                        values: state.values()[pair * 2 * pp.width..(pair + 1) * 2 * pp.width]
                             .to_vec(),
                         path: if virtual_source && layer == 0 {
                             vec![]
@@ -459,7 +485,7 @@ mod tests {
                     let beta = power(root, 2 * rev + 1);
                     assert_eq!(
                         source.polynomial.evaluate(beta),
-                        source.values[index * width..(index + 1) * width]
+                        source.values()[index * width..(index + 1) * width]
                     );
                 }
                 let mut prover = Transcript::new();

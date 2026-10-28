@@ -98,3 +98,60 @@ fn identical_roots_have_distinct_bound_backend_contexts() {
     );
     assert_eq!(state.spent().unwrap(), 2);
 }
+
+#[test]
+fn transient_cache_preserves_canonical_context_and_packet() {
+    let retained = joint::Parameters::<F, E>::new(1, 1, 10, 2, 1, 2).unwrap();
+    let transient = retained.clone().with_transient_source_values();
+    assert_eq!(
+        CanonicalPcs::<F, Sha256>::context(&retained).unwrap(),
+        CanonicalPcs::<F, Sha256>::context(&transient).unwrap()
+    );
+    let table = PackedTable::new(1, 1, vec![F::from(5usize), F::from(8usize)]).unwrap();
+    let (root, state) = retained
+        .commit::<Sha256, _>(&table, &mut StdRng::seed_from_u64(993))
+        .unwrap();
+    let (other, transient_state) = transient
+        .commit::<Sha256, _>(&table, &mut StdRng::seed_from_u64(993))
+        .unwrap();
+    assert_eq!(root.root, other.root);
+    assert!(state.cached_codeword_elements().unwrap() > 0);
+    assert_eq!(transient_state.cached_codeword_elements().unwrap(), 0);
+    let queries = vec![vec![MatrixPair {
+        zero: Matrix::identity(1).unwrap(),
+        one: Matrix::identity(1).unwrap(),
+    }]];
+    let claims = vec![table.evaluate(&queries[0]).unwrap()];
+    let mut a = Transcript::new_direct();
+    let mut b = Transcript::new_direct();
+    let proof =
+        CanonicalPcs::<F, Sha256>::open_many(&retained, &mut a, &root, &state, &queries, &claims)
+            .unwrap();
+    let regenerated = CanonicalPcs::<F, Sha256>::open_many(
+        &retained,
+        &mut b,
+        &other,
+        &transient_state,
+        &queries,
+        &claims,
+    )
+    .unwrap();
+    assert_eq!(
+        bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap(),
+        bincode::serde::encode_to_vec(&regenerated, bincode::config::standard()).unwrap()
+    );
+    assert_eq!(
+        a.get_challenge(b"transient canonical after"),
+        b.get_challenge(b"transient canonical after")
+    );
+    assert_eq!(transient_state.cached_codeword_elements().unwrap(), 0);
+    CanonicalPcs::<F, Sha256>::verify_many(
+        &transient,
+        &mut Transcript::new_direct(),
+        &root,
+        &queries,
+        &claims,
+        &regenerated,
+    )
+    .unwrap();
+}

@@ -7,6 +7,14 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Masked source owners now support an opt-in transient encoded-codeword cache.
+It regenerates the identical oracle once per batch and releases it afterward,
+reducing idle retained allocations at the cost of extra FFT work. Retained and
+transient proof bytes, roots, contexts and transcripts are compared in both
+fields for 1/4/16-query batches and independent openings. See
+`transient-source-cache.md`. This enables further original-size resource work;
+it does not establish a full native PBS memory bound or latency improvement.
+
 Fresh complete invalid-borrow lookup certificates now cover both blind-rotation
 halves and final key switching in versions 10/11 over both fields and all three
 canonical backends. All 36 new forgeries reject at the terminal reciprocal

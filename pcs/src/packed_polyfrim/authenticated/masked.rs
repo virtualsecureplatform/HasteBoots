@@ -23,6 +23,8 @@ pub struct Parameters<F> {
     root: F,
     #[serde(skip)]
     encoder: fn(&[F], usize, F) -> Vec<F>,
+    #[serde(skip)]
+    transient_source_values: bool,
 }
 impl<F: Field + Serialize> Parameters<F> {
     /// Commit m logical vector coefficients, pad to 2m, and retain masks for an
@@ -65,6 +67,7 @@ impl<F: Field + Serialize> Parameters<F> {
             max_openings,
             root,
             encoder: rolling_fri::encode::<F>,
+            transient_source_values: false,
         })
     }
     /// Use base-coordinate FFTs without changing the masked protocol or its
@@ -84,6 +87,13 @@ impl<F: Field + Serialize> Parameters<F> {
         }
         self.encoder = rolling_fri::encode_extension::<Base, F>;
         Ok(self)
+    }
+    /// Discard the encoded source after commitment and each opening batch.
+    /// Regenerates the identical oracle from retained coefficients when needed.
+    /// This trades FFT work for retained memory and changes no protocol bytes.
+    pub fn with_transient_source_values(mut self) -> Self {
+        self.transient_source_values = true;
+        self
     }
     /// Maximum opening attempts after successful preflight, across this source.
     pub fn max_openings(&self) -> usize {
@@ -107,8 +117,18 @@ pub struct ProverSession<F, H: Hash + Send + Sync> {
     source: super::State<F, H>,
     context: H::Output,
     spent: usize,
+    transient_source_values: bool,
 }
 impl<F, H: Hash + Send + Sync> ProverSession<F, H> {
+    /// Number of encoded field elements currently retained by this owner.
+    pub fn cached_codeword_elements(&self) -> usize {
+        self.source.cached_codeword_elements()
+    }
+    fn evict_if_transient(&mut self) {
+        if self.transient_source_values {
+            self.source.evict_values();
+        }
+    }
     /// Public root of the padded source and independent mask in one packed tree.
     pub fn root(&self) -> H::Output {
         self.source.root()
@@ -160,11 +180,15 @@ pub fn commit<F: Field + Serialize, H: Hash + Send + Sync, R: Rng + CryptoRng>(
         width: 2 * pp.width,
         coefficients,
     };
-    let source = super::commit(&pp.oracle(true), paired)?;
+    let mut source = super::commit(&pp.oracle(true), paired)?;
+    if pp.transient_source_values {
+        source.evict_values();
+    }
     Ok(ProverSession {
         source,
         context: hash::<H, _>(&(b"masked packed PolyFRIM parameters v2".as_slice(), pp)),
         spent: 0,
+        transient_source_values: pp.transient_source_values,
     })
 }
 fn padded_query<F: Field + Serialize>(
@@ -395,9 +419,9 @@ fn prove_response<F: Field + Serialize, H: Hash + Send + Sync, S>(
         width: pp.width,
         coefficients,
     };
-    let values = session
+    let values: Vec<_> = session
         .source
-        .values
+        .values()
         .chunks_exact(2 * pp.width)
         .flat_map(|v| {
             v[..pp.width]
@@ -411,7 +435,8 @@ fn prove_response<F: Field + Serialize, H: Hash + Send + Sync, S>(
     tree.root = identifier;
     let virtual_source = super::State {
         polynomial,
-        values,
+        values: std::sync::OnceLock::from(values),
+        encoding: oracle.clone(),
         tree,
         context: hash::<H, _>(&(b"packed PolyFRIM parameters v2", &oracle)),
         layer: 0,
@@ -429,7 +454,7 @@ fn prove_response<F: Field + Serialize, H: Hash + Send + Sync, S>(
             let pair = index / 2;
             let width = 2 * pp.width;
             Pair {
-                values: session.source.values[pair * 2 * width..(pair + 1) * 2 * width].to_vec(),
+                values: session.source.values()[pair * 2 * width..(pair + 1) * 2 * width].to_vec(),
                 path: session.source.tree.query(pair),
             }
         })
@@ -457,8 +482,9 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
     let prepared = prepare(pp, session, query, claim)?;
     let index = session.spent;
     session.spent += 1;
-    let ((source_proximity, source_pairs), response) =
-        prove_response(t, pp, session, index, prepared, source_prove::<F, H>)?;
+    let result = prove_response(t, pp, session, index, prepared, source_prove::<F, H>);
+    session.evict_if_transient();
+    let ((source_proximity, source_pairs), response) = result?;
     Ok(Proof {
         index: response.index,
         mask_claim: response.mask_claim,
@@ -691,7 +717,7 @@ fn source_prove<F: Field + Serialize, H: Hash + Send + Sync>(
     let wide = pp.oracle(true);
     let mut values = vec![
         source
-            .values
+            .values()
             .chunks_exact(2 * pp.width)
             .map(|v| {
                 v.iter()
@@ -712,7 +738,7 @@ fn source_prove<F: Field + Serialize, H: Hash + Send + Sync>(
             let position = index / 2;
             let width = 2 * pp.width;
             Pair {
-                values: source.values[position * 2 * width..(position + 1) * 2 * width].to_vec(),
+                values: source.values()[position * 2 * width..(position + 1) * 2 * width].to_vec(),
                 path: source.tree.query(position),
             }
         })
@@ -1051,9 +1077,9 @@ mod tests {
                 .map(|(&p, &s)| p + alpha * s)
                 .collect();
             coefficients[0] += delta;
-            let values = session
+            let values: Vec<_> = session
                 .source
-                .values
+                .values()
                 .chunks_exact(2)
                 .map(|v| v[0] + alpha * v[1] + delta)
                 .collect();
@@ -1065,7 +1091,8 @@ mod tests {
                     width,
                     coefficients,
                 },
-                values,
+                values: std::sync::OnceLock::from(values),
+                encoding: oracle.clone(),
                 tree,
                 context: hash::<Sha256, _>(&(b"packed PolyFRIM parameters v2", &oracle)),
                 layer: 0,
@@ -1084,7 +1111,7 @@ mod tests {
                 .map(|index| {
                     let pair = index / 2;
                     Pair {
-                        values: session.source.values[pair * 4..(pair + 1) * 4].to_vec(),
+                        values: session.source.values()[pair * 4..(pair + 1) * 4].to_vec(),
                         path: session.source.tree.query(pair),
                     }
                 })

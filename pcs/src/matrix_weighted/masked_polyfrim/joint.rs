@@ -168,6 +168,12 @@ where
     F: NTTField + Serialize,
     EF: AbstractExtensionField<F> + Serialize,
 {
+    /// Regenerate source codewords once per batch and discard them afterward.
+    /// This memory policy changes no trusted context or proof format.
+    pub fn with_transient_source_values(mut self) -> Self {
+        self.independent = self.independent.with_transient_source_values();
+        self
+    }
     /// Validate the same logical/physical geometry and per-query mask lifetime.
     pub fn new(
         logical_vars: usize,

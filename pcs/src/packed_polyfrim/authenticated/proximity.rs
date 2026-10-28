@@ -44,7 +44,7 @@ pub(super) fn prove_source<F: Field + Serialize, H: Hash + Send + Sync>(
         .zip(&weights)
         .map(|(state, row)| {
             state
-                .values
+                .values()
                 .chunks_exact(pp.width)
                 .map(|v| dot(v, row))
                 .collect()
@@ -64,7 +64,7 @@ pub(super) fn prove_source<F: Field + Serialize, H: Hash + Send + Sync>(
                 .map(|(layer, state)| {
                     let pair = (index >> layer) / 2;
                     Pair {
-                        values: state.values[pair * 2 * pp.width..(pair + 1) * 2 * pp.width]
+                        values: state.values()[pair * 2 * pp.width..(pair + 1) * 2 * pp.width]
                             .to_vec(),
                         path: if virtual_source && layer == 0 {
                             vec![]
@@ -249,7 +249,7 @@ mod tests {
                 .iter()
                 .zip(&weights)
                 .map(|(s, w)| {
-                    s.values
+                    s.values()
                         .chunks_exact(width)
                         .map(|v| dot(v, w) + F::one())
                         .collect()
@@ -273,7 +273,8 @@ mod tests {
                         .map(|(layer, s)| {
                             let position = (index >> layer) / 2;
                             Pair {
-                                values: s.values[position * 2 * width..(position + 1) * 2 * width]
+                                values: s.values()
+                                    [position * 2 * width..(position + 1) * 2 * width]
                                     .to_vec(),
                                 path: s.tree.query(position),
                             }
@@ -371,11 +372,17 @@ mod tests {
         let mut coefficients = vec![F::zero(); message + 1];
         coefficients[message] = F::one();
         let bad = rolling_fri::encode(&coefficients, pp.len(0), root);
-        for (v, &b) in source.values.chunks_exact_mut(width).zip(&bad) {
+        for (v, &b) in source
+            .values
+            .get_mut()
+            .unwrap()
+            .chunks_exact_mut(width)
+            .zip(&bad)
+        {
             v[0] = b;
         }
         let leaves: Vec<_> = source
-            .values
+            .values()
             .chunks_exact(2 * width)
             .enumerate()
             .map(|(index, v)| leaf::<F, Sha256>(&pp, 0, index, v))
@@ -391,7 +398,7 @@ mod tests {
         let values = states
             .iter()
             .zip(&weights)
-            .map(|(s, w)| s.values.chunks_exact(width).map(|v| dot(v, w)).collect())
+            .map(|(s, w)| s.values().chunks_exact(width).map(|v| dot(v, w)).collect())
             .collect();
         let fri = rolling_fri::Parameters::new(message, 4, 32, root).unwrap();
         let (proximity, trace) =
@@ -407,7 +414,7 @@ mod tests {
                     .map(|(layer, s)| {
                         let position = (index >> layer) / 2;
                         Pair {
-                            values: s.values[position * 2 * width..(position + 1) * 2 * width]
+                            values: s.values()[position * 2 * width..(position + 1) * 2 * width]
                                 .to_vec(),
                             path: s.tree.query(position),
                         }

@@ -71,33 +71,37 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
         .zip(claims)
         .map(|(q, c)| prepare(pp, session, q, c))
         .collect::<Result<Vec<_>, _>>()?;
-    let ordered: Vec<_> = prepared
-        .iter()
-        .map(|p| {
-            (
-                p.query.as_slice(),
-                p.claim.as_slice(),
-                p.mask_claim.as_slice(),
-            )
-        })
-        .collect();
     session.spent += prepared.len();
-    begin(t, pp, &session.root(), first, &ordered);
-    let (source_proximity, source_pairs) = source_prove::<F, H>(t, pp, &session.source, first)?;
-    let mut responses = Vec::with_capacity(prepared.len());
-    for (position, p) in prepared.into_iter().enumerate() {
-        member(t, first, position);
-        let ((), response) =
-            prove_response(t, pp, session, first + position, p, |_, _, _, _| Ok(()))?;
-        responses.push(response);
-    }
-    finish(t, first, responses.len());
-    Ok(Proof {
-        first,
-        source_proximity,
-        source_pairs,
-        responses,
-    })
+    let result = (|| {
+        let ordered: Vec<_> = prepared
+            .iter()
+            .map(|p| {
+                (
+                    p.query.as_slice(),
+                    p.claim.as_slice(),
+                    p.mask_claim.as_slice(),
+                )
+            })
+            .collect();
+        begin(t, pp, &session.root(), first, &ordered);
+        let (source_proximity, source_pairs) = source_prove::<F, H>(t, pp, &session.source, first)?;
+        let mut responses = Vec::with_capacity(prepared.len());
+        for (position, p) in prepared.into_iter().enumerate() {
+            member(t, first, position);
+            let ((), response) =
+                prove_response(t, pp, session, first + position, p, |_, _, _, _| Ok(()))?;
+            responses.push(response);
+        }
+        finish(t, first, responses.len());
+        Ok(Proof {
+            first,
+            source_proximity,
+            source_pairs,
+            responses,
+        })
+    })();
+    session.evict_if_transient();
+    result
 }
 /// Verify the shared original source before any query-specific response. The
 /// original source root, trusted parameters and ordered claims are caller inputs.
@@ -241,9 +245,23 @@ mod tests {
         .unwrap();
         let mut ra = StdRng::seed_from_u64(719);
         let mut rb = ra.clone();
+        let mut rc = ra.clone();
+        let mut rd = ra.clone();
+        let transient_pp = pp.clone().with_transient_source_values();
+        assert_eq!(
+            bincode::serde::encode_to_vec(&pp, bincode::config::standard()).unwrap(),
+            bincode::serde::encode_to_vec(&transient_pp, bincode::config::standard()).unwrap()
+        );
+        let mut transient = commit::<E, Sha256, _>(&transient_pp, &table, &mut rc).unwrap();
+        let mut transient_independent =
+            commit::<E, Sha256, _>(&transient_pp, &table, &mut rd).unwrap();
+        assert_eq!(transient.cached_codeword_elements(), 0);
         let mut joint = commit::<E, Sha256, _>(&pp, &table, &mut ra).unwrap();
         let mut independent = commit::<E, Sha256, _>(&pp, &table, &mut rb).unwrap();
         assert_eq!(joint.root(), independent.root());
+        assert_eq!(joint.root(), transient.root());
+        assert!(joint.cached_codeword_elements() > 0);
+        assert_eq!(ra.clone().next_u64(), rc.next_u64());
         assert_eq!(ra.next_u64(), rb.next_u64());
         let mut acceptance = VerifierSession::new(joint.root());
         let mut matrix_coins = Transcript::<E>::new_direct_extension::<B>();
@@ -279,6 +297,23 @@ mod tests {
                     .0,
                 "false masked source claim"
             );
+            let mut transient_attempt = Transcript::new_direct_extension::<B>();
+            assert!(
+                prove(
+                    &mut transient_attempt,
+                    &pp,
+                    &mut transient,
+                    &queries,
+                    &wrong
+                )
+                .is_err()
+            );
+            assert_eq!(transient.spent(), first);
+            assert_eq!(transient.cached_codeword_elements(), 0);
+            assert_eq!(
+                transient_attempt.get_challenge(b"preflight after"),
+                Transcript::<E>::new_direct_extension::<B>().get_challenge(b"preflight after")
+            );
             assert_eq!(joint.spent(), first);
             assert_eq!(
                 attempted.get_challenge(b"preflight after"),
@@ -288,6 +323,17 @@ mod tests {
             let mut pt = Transcript::new_direct_extension::<B>();
             let proof = prove(&mut pt, &pp, &mut joint, &queries, &claims).unwrap();
             let bytes = bincode::serde::encode_to_vec(&proof, bincode::config::standard()).unwrap();
+            let mut transient_t = Transcript::new_direct_extension::<B>();
+            // Retention policy belongs to the owner, even with retained parameters here.
+            let transient_proof =
+                prove(&mut transient_t, &pp, &mut transient, &queries, &claims).unwrap();
+            assert_eq!(transient.cached_codeword_elements(), 0);
+            assert_eq!(
+                bytes,
+                bincode::serde::encode_to_vec(&transient_proof, bincode::config::standard())
+                    .unwrap()
+            );
+
             let (decoded, used): (Proof<E, [u8; 32]>, usize) =
                 bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
             assert_eq!(used, bytes.len());
@@ -306,6 +352,7 @@ mod tests {
             )
             .unwrap();
             let after = pt.get_challenge(b"joint batch after");
+            assert_eq!(after, transient_t.get_challenge(b"joint batch after"));
             assert_eq!(after, vt.get_challenge(b"joint batch after"));
             assert_eq!(after, stateless.get_challenge(b"joint batch after"));
             end += count;
@@ -325,6 +372,27 @@ mod tests {
                     super::super::prove(&mut old_transcript, &pp, &mut independent, q, c).unwrap()
                 })
                 .collect();
+            let mut transient_old_t = Transcript::new_direct_extension::<B>();
+            let transient_old: Vec<_> = queries
+                .iter()
+                .zip(&claims)
+                .map(|(q, c)| {
+                    let proof = super::super::prove(
+                        &mut transient_old_t,
+                        &pp,
+                        &mut transient_independent,
+                        q,
+                        c,
+                    )
+                    .unwrap();
+                    assert_eq!(transient_independent.cached_codeword_elements(), 0);
+                    proof
+                })
+                .collect();
+            assert_eq!(
+                bincode::serde::encode_to_vec(&old, bincode::config::standard()).unwrap(),
+                bincode::serde::encode_to_vec(&transient_old, bincode::config::standard()).unwrap()
+            );
             let old_bytes =
                 bincode::serde::encode_to_vec(&old, bincode::config::standard()).unwrap();
             for (p, q) in decoded.responses.iter().zip(&old) {

@@ -49,6 +49,13 @@ impl<F: Field, EF, H: Hash + Send + Sync> State<F, EF, H> {
     pub fn table(&self) -> &PackedTable<F> {
         &self.table
     }
+    /// Number of encoded field elements retained by the private source owner.
+    pub fn cached_codeword_elements(&self) -> Result<usize, Error> {
+        self.session
+            .lock()
+            .map(|s| s.cached_codeword_elements())
+            .map_err(|_| Error("poisoned private mask session"))
+    }
     /// Query the private lifetime counter; poisoned sessions fail closed.
     pub fn spent(&self) -> Result<usize, Error> {
         self.session
@@ -68,6 +75,12 @@ where
     F: NTTField + Serialize,
     EF: AbstractExtensionField<F> + Serialize,
 {
+    /// Regenerate source codewords per opening batch instead of retaining them.
+    /// This memory policy changes no trusted context or proof format.
+    pub fn with_transient_source_values(mut self) -> Self {
+        self.inner = self.inner.with_transient_source_values();
+        self
+    }
     /// Fix the logical shape and explicit physical capacity. Physical variables
     /// must cover the logical table; the core disclosure guard must hold.
     /// The domain uses an available base-field root embedded in the extension.
