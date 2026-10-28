@@ -11,8 +11,8 @@ The canonical prover now releases completed blind-rotation witness owners before
 allocating final key-switching sources. All four complete joint-backend proof
 profiles (versions 10/11, both fields) retain exact archived non-timing fields,
 including serialized proof hashes. Original key-owner lifetimes remain intact.
-See `canonical-witness-release.md`. Complete original-size masked PBS execution
-is being prepared separately; it is not yet verified.
+See `canonical-witness-release.md`. A tracked original-size Goldilocks masked PBS proof/replay run is now launched;
+it is not yet verified. See `native-complete-masked-pbs-profile.md`.
 
 Original-size native masked key owners now pass resource validation in both
 fields with the original FHE constants and 128 sampling queries. Four isolated
