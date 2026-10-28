@@ -109,6 +109,28 @@ where
 fn group<F: NTTField>(trans: &mut Transcript<F>, final_stage: bool, start: usize, end: usize) {
     trans.append_message(b"PBS shared lookup group", &(final_stage, start, end));
 }
+/// Wall-clock prover phase counters; never serialized or transcript-bound.
+#[derive(Default, Debug)]
+pub struct Statistics {
+    /// Entire partial-member phase, including its small uninstrumented overhead.
+    pub members_total: Duration,
+    /// Partial-member stages; `hadamard` measures only an obligation marker.
+    pub members: ProverStatistics,
+    /// Binding outer statements/contexts and preparing joint Hadamard references.
+    pub binding: Duration,
+    /// Mandatory joint Hadamard algebra and authentication.
+    pub hadamard: Duration,
+    /// Releasing retained evaluation states after their joint proof.
+    pub release_evaluations: Duration,
+    /// Entire BR comparison phase, including registry creation and state release.
+    pub blind_rotation_total: Duration,
+    /// Actual BR lookup subphases, excluding surrounding registry/release work.
+    pub blind_rotation: crate::packed_lane_lookup::ProverStatistics,
+    /// Entire final comparison phase, including registry creation and state release.
+    pub key_switch_total: Duration,
+    /// Actual final lookup subphases, excluding surrounding registry/release work.
+    pub key_switch: crate::packed_lane_lookup::ProverStatistics,
+}
 /// Prove complete statements, reusing owned source states for joint authentication.
 pub fn prove<F, EF, H, C>(
     pp: &Parameters<'_, C>,
@@ -122,9 +144,26 @@ where
     H: Hash + Send + Sync,
     C: RowCode<F> + Serialize,
 {
+    prove_with_statistics::<F, EF, H, C>(pp, setup, statements, traces, &mut Statistics::default())
+}
+/// Prove the same complete certificate while accumulating actual phase costs.
+pub fn prove_with_statistics<F, EF, H, C>(
+    pp: &Parameters<'_, C>,
+    setup: &ProverSetup<F, H>,
+    statements: &[Statement<'_, F>],
+    traces: &[&PBSTrace<F>],
+    statistics: &mut Statistics,
+) -> Result<Proof<F, EF, H::Output>, Error>
+where
+    F: NTTField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    C: RowCode<F> + Serialize,
+{
     if statements.is_empty() || statements.len() != traces.len() {
         return Err(error("comparison batch statement/trace count"));
     }
+    let timer = Instant::now();
     let mut members = Vec::new();
     let mut owners = Vec::new();
     for (statement, trace) in statements.iter().zip(traces) {
@@ -140,11 +179,13 @@ where
             setup,
             statement,
             trace,
-            &mut ProverStatistics::default(),
+            &mut statistics.members,
             Some(&mut owner),
         )?);
         owners.push(owner.ok_or_else(|| error("missing comparison batch owner"))?);
     }
+    statistics.members_total += timer.elapsed();
+    let timer = Instant::now();
     let mut trans = Transcript::new_direct();
     let roots = bind::<F, EF, H, C>(&mut trans, pp, &setup.verifier, statements, &members)?;
     let key = setup.br.oracles(pp.source).map_err(convert)?;
@@ -170,10 +211,14 @@ where
     }
     let shapes = vec![hadamard_shape(pp.source, d); members.len()];
     let slices: Vec<_> = tables.iter().map(Vec::as_slice).collect();
+    statistics.binding += timer.elapsed();
+    let timer = Instant::now();
     let hadamard = relations::prove_borrowed::<F, EF, H, C>(
         &mut trans, &shapes, pp.source, &slices, &roots, &states,
     )
     .map_err(convert)?;
+    statistics.hadamard += timer.elapsed();
+    let timer = Instant::now();
     drop(slices);
     drop(tables);
     drop(states);
@@ -181,9 +226,11 @@ where
         o.states.clear();
         o.tables.clear();
     }
+    statistics.release_evaluations += timer.elapsed();
     let mut blind_rotation = Vec::new();
     let mut key_switch = Vec::new();
     for final_stage in [false, true] {
+        let timer = Instant::now();
         let config = if final_stage {
             setup
                 .verifier
@@ -254,12 +301,17 @@ where
                 }
             }
             group(&mut trans, final_stage, start, end);
-            let proof = lookup::prove::<F, EF, H, C>(
+            let proof = lookup::prove_with_statistics::<F, EF, H, C>(
                 &mut trans,
                 helper,
                 &registry.iter().collect::<Vec<_>>(),
                 &decomp::batch::requests::<F>(&vec![config.clone(); end - start])
                     .map_err(convert)?,
+                if final_stage {
+                    &mut statistics.key_switch
+                } else {
+                    &mut statistics.blind_rotation
+                },
             )
             .map_err(convert)?;
             drop(registry);
@@ -275,6 +327,11 @@ where
                     o.borrows.clear();
                 }
             }
+        }
+        if final_stage {
+            statistics.key_switch_total += timer.elapsed();
+        } else {
+            statistics.blind_rotation_total += timer.elapsed();
         }
     }
     Ok(Proof {

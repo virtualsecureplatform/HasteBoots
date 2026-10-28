@@ -138,6 +138,40 @@ macro_rules! exercise {
                 let (proof, used): (batch::Proof<F, EF, [u8; 32]>, _) =
                     bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
                 assert_eq!(used, bytes.len());
+                if count == 1 {
+                    let mut statistics = batch::Statistics::default();
+                    let timed = batch::prove_with_statistics::<F, EF, Sha256, _>(
+                        &pp,
+                        &setup,
+                        &statements,
+                        &traces,
+                        &mut statistics,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        bytes,
+                        bincode::serde::encode_to_vec(&timed, bincode::config::standard()).unwrap()
+                    );
+                    assert!(statistics.members.ntt.as_nanos() > 0);
+                    assert!(statistics.hadamard.as_nanos() > 0);
+                    for (total, phases) in [
+                        (&statistics.blind_rotation_total, &statistics.blind_rotation),
+                        (&statistics.key_switch_total, &statistics.key_switch),
+                    ] {
+                        assert!(phases.sumcheck.as_nanos() > 0 && phases.openings.as_nanos() > 0);
+                        assert_eq!(phases.zero_check.as_nanos(), 0);
+                        assert!(
+                            *total
+                                >= phases.preparation
+                                    + phases.commitment
+                                    + phases.sumcheck
+                                    + phases.zero_check
+                                    + phases.terminal_evaluation
+                                    + phases.openings
+                        );
+                    }
+                }
+
                 batch::verify::<F, EF, Sha256, _>(&pp, &public, &statements, &proof).unwrap();
                 let reject = |statements: &[_], proof: &_| {
                     assert!(
