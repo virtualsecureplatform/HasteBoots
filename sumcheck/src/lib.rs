@@ -12,6 +12,8 @@ use serde::Serialize;
 use std::marker::PhantomData;
 use verifier::SubClaim;
 
+/// Shared-challenge independent scalar sumchecks, including extension fields.
+pub mod batch;
 pub mod error;
 pub mod packed;
 pub mod packed_zero;
