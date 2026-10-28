@@ -91,3 +91,7 @@ oracle borrows; expected public setup contains no private state. See
 Accumulator linkage now shares its arithmetic/query maps across canonical
 backends, with retained state authentication and backend-specific framing. See
 `canonical-packed-accumulator.md`. Complete masked PBS composition remains open.
+
+Public monomial products also compose canonical NTT and terminal authentication,
+with explicit trusted evaluation parameters and private derived-root commitment
+randomness. See `canonical-packed-monomial.md`; full masked PBS remains open.

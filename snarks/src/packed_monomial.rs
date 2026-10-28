@@ -588,3 +588,6 @@ mod binding_tests {
         );
     }
 }
+
+/// Public monomial products over statically selected canonical PCS backends.
+pub mod canonical;

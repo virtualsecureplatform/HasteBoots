@@ -7,6 +7,12 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Public monomial products now have a canonical backend entry point, composing
+both original-source NTT links with the caller-derived public rotation identity.
+Derived roots retain one bounded session across NTT and terminal openings. See
+`canonical-packed-monomial.md`. Full masked PBS composition and the original
+security/performance gates remain open.
+
 Accumulator linkage now dispatches through canonical backend sources while
 sharing the original endpoint, continuity and duplicated-half equations. Legacy
 callers retain their proof shape; masked callers authenticate ordered queries
