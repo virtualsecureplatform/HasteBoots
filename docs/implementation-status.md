@@ -7,6 +7,16 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Direct packed PolyFRIM now has an experimental bounded-reuse masked reference.
+Private high coefficients and an independent vector mask protect the intended
+public-fold view, with separate same-root checks on source/mask lanes and the
+virtual combined ladder. Session counters prevent silent mask refresh; numerical
+capacity is checked. All 63 selected release tests pass, including sixteen
+decoded masked packets and four fresh false-claim certificates. This is
+implementation progress, not a hiding theorem or
+native complete-PBS result. See `masked-packed-polyfrim.md`; cumulative rank,
+quantitative soundness and adaptive hash/Fiat–Shamir analysis remain open.
+
 The direct packed PolyFRIM algebraic core now converts canonical Boolean tables
 to vector-polynomial coefficients, applies ordered matrix folds and computes
 antipodal consistency symbols without the scalar bridge's extra sumcheck.

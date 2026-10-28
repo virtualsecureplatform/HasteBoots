@@ -153,3 +153,9 @@ under `cfg(test)`; production proving and verification retain strict checks.
 Logs, checked counts and validated sources are under
 `target/performance/direct-packed-polyfrim-proximity/`, source SHA-256
 `16503bab78953a3f4e4807b7a42a7d6bffd71b8c87dcbaaaee8930711f3f8eb0`.
+
+The bounded-reuse masked reference is now implemented in
+`authenticated::masked`; see `masked-packed-polyfrim.md`. It uses private high
+padding, an independent full vector mask, separate source/mask proximity and a
+virtual combined source. Its numerical lifetime/disclosure guard is not a
+zero-knowledge proof; the masking and full-security gates remain open.

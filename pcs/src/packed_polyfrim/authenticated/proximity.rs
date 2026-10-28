@@ -23,9 +23,20 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
     query: &[MatrixPair<F>],
     claim: &[F],
 ) -> Result<Proof<F, H::Output>, Error> {
+    prove_source(t, pp, source, query, claim, false).map(|(proof, _)| proof)
+}
+pub(super) fn prove_source<F: Field + Serialize, H: Hash + Send + Sync>(
+    t: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    source: &State<F, H>,
+    query: &[MatrixPair<F>],
+    claim: &[F],
+    virtual_source: bool,
+) -> Result<(Proof<F, H::Output>, Vec<usize>), Error> {
     let layers = ladder(pp, source, query, claim)?;
     let states: Vec<_> = std::iter::once(source).chain(layers.iter()).collect();
-    let consistency = certificate(t, pp, &states, query, claim);
+    let (consistency, mut source_indices) =
+        certificate_traced(t, pp, &states, query, claim, virtual_source);
     let roots: Vec<_> = states.iter().map(|s| s.root()).collect();
     let (weights, identifiers) = project::<F, H>(t, pp, &roots);
     let values = states
@@ -55,17 +66,25 @@ pub fn prove<F: Field + Serialize, H: Hash + Send + Sync>(
                     Pair {
                         values: state.values[pair * 2 * pp.width..(pair + 1) * 2 * pp.width]
                             .to_vec(),
-                        path: state.tree.query(pair),
+                        path: if virtual_source && layer == 0 {
+                            vec![]
+                        } else {
+                            state.tree.query(pair)
+                        },
                     }
                 })
                 .collect()
         })
         .collect();
-    Ok(Proof {
-        consistency,
-        proximity,
-        packed,
-    })
+    source_indices.extend_from_slice(&trace.indices);
+    Ok((
+        Proof {
+            consistency,
+            proximity,
+            packed,
+        },
+        source_indices,
+    ))
 }
 
 /// Verify matrix transitions and projected proximity against the exact same
@@ -78,10 +97,36 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
     claim: &[F],
     proof: &Proof<F, H::Output>,
 ) -> Result<(), Error> {
+    verify_source::<F, H, _>(t, pp, source, query, claim, proof, false, |_, _| {
+        Err(Error("unexpected virtual source"))
+    })
+}
+pub(super) fn verify_source<F: Field + Serialize, H: Hash + Send + Sync, V>(
+    t: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    source: &H::Output,
+    query: &[MatrixPair<F>],
+    claim: &[F],
+    proof: &Proof<F, H::Output>,
+    virtual_source: bool,
+    mut authenticate: V,
+) -> Result<(), Error>
+where
+    V: FnMut(usize, &Pair<F, H::Output>) -> Result<(), Error>,
+{
     if proof.packed.len() != pp.queries || proof.packed.iter().any(|q| q.len() != pp.rounds()) {
         return Err(Error("proximity packed query shape"));
     }
-    super::verify::<F, H>(t, pp, source, query, claim, &proof.consistency)?;
+    super::verify_source::<F, H, _>(
+        t,
+        pp,
+        source,
+        query,
+        claim,
+        &proof.consistency,
+        virtual_source,
+        &mut authenticate,
+    )?;
     let roots: Vec<_> = std::iter::once(*source)
         .chain(proof.consistency.roots.iter().copied())
         .collect();
@@ -99,7 +144,12 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
             calls += 1;
             let position = (index >> layer) / 2;
             let depth = (pp.len(layer) / 2).ilog2() as usize;
-            if opening.values.len() != 2 * pp.width
+            if virtual_source && layer == 0 {
+                if opening.values.len() != 2 * pp.width || !opening.path.is_empty() {
+                    return Err(rolling_fri::Error("virtual source shape"));
+                }
+                authenticate(index, opening).map_err(|e| rolling_fri::Error(e.0))?;
+            } else if opening.values.len() != 2 * pp.width
                 || opening.path.len() != depth + 1
                 || opening.path[0] != leaf::<F, H>(pp, layer, position, &opening.values)
                 || !MerkleTree::<H>::check(&roots[layer], position, &opening.path)

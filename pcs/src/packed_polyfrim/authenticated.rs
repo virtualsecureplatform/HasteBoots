@@ -3,6 +3,8 @@
 //! This proves sampled transitions only. It is not an evaluation-binding PCS:
 //! a separately composed proximity proof is required for every oracle lane.
 use super::{Polynomial, fold_symbol};
+/// Experimental private padding and bounded-reuse masking.
+pub mod masked;
 /// Same-root rolling proximity checks composed with matrix consistency.
 pub mod proximity;
 use crate::{
@@ -201,11 +203,26 @@ fn certificate<F: Field + Serialize, H: Hash + Send + Sync>(
     query: &[MatrixPair<F>],
     claim: &[F],
 ) -> Proof<F, H::Output> {
+    certificate_traced(t, pp, states, query, claim, false).0
+}
+fn certificate_traced<F: Field + Serialize, H: Hash + Send + Sync>(
+    t: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    states: &[&State<F, H>],
+    query: &[MatrixPair<F>],
+    claim: &[F],
+    virtual_source: bool,
+) -> (Proof<F, H::Output>, Vec<usize>) {
+    if virtual_source {
+        t.append_message(b"packed PolyFRIM virtual source v1", &());
+    }
     let roots: Vec<_> = states[1..].iter().map(|s| s.root()).collect();
     bind(t, pp, &states[0].root(), &roots, query, claim);
-    let queries = (0..pp.queries)
-        .map(|_| {
-            let index = sample(t, pp.len(0));
+    let indices: Vec<_> = (0..pp.queries).map(|_| sample(t, pp.len(0))).collect();
+    let queries = indices
+        .iter()
+        .copied()
+        .map(|index| {
             states
                 .iter()
                 .enumerate()
@@ -214,13 +231,17 @@ fn certificate<F: Field + Serialize, H: Hash + Send + Sync>(
                     Pair {
                         values: state.values[pair * 2 * pp.width..(pair + 1) * 2 * pp.width]
                             .to_vec(),
-                        path: state.tree.query(pair),
+                        path: if virtual_source && layer == 0 {
+                            vec![]
+                        } else {
+                            state.tree.query(pair)
+                        },
                     }
                 })
                 .collect()
         })
         .collect();
-    Proof { roots, queries }
+    (Proof { roots, queries }, indices)
 }
 
 /// Verify authentication and every sampled matrix transition, including the
@@ -233,12 +254,32 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
     claim: &[F],
     proof: &Proof<F, H::Output>,
 ) -> Result<(), Error> {
+    verify_source::<F, H, _>(t, pp, source, query, claim, proof, false, |_, _| {
+        Err(Error("unexpected virtual source"))
+    })
+}
+fn verify_source<F: Field + Serialize, H: Hash + Send + Sync, V>(
+    t: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    source: &H::Output,
+    query: &[MatrixPair<F>],
+    claim: &[F],
+    proof: &Proof<F, H::Output>,
+    virtual_source: bool,
+    mut authenticate: V,
+) -> Result<(), Error>
+where
+    V: FnMut(usize, &Pair<F, H::Output>) -> Result<(), Error>,
+{
     pp.query(query, claim)?;
     if proof.roots.len() != pp.rounds() - 1
         || proof.queries.len() != pp.queries
         || proof.queries.iter().any(|q| q.len() != pp.rounds())
     {
         return Err(Error("certificate shape"));
+    }
+    if virtual_source {
+        t.append_message(b"packed PolyFRIM virtual source v1", &());
     }
     bind(t, pp, source, &proof.roots, query, claim);
     for openings in &proof.queries {
@@ -251,7 +292,12 @@ pub fn verify<F: Field + Serialize, H: Hash + Send + Sync>(
             } else {
                 &proof.roots[layer - 1]
             };
-            if pair.values.len() != 2 * pp.width
+            if virtual_source && layer == 0 {
+                if pair.values.len() != 2 * pp.width || !pair.path.is_empty() {
+                    return Err(Error("virtual source shape"));
+                }
+                authenticate(index, pair)?;
+            } else if pair.values.len() != 2 * pp.width
                 || pair.path.len() != depth + 1
                 || pair.path[0] != leaf::<F, H>(pp, layer, position, &pair.values)
                 || !MerkleTree::<H>::check(root, position, &pair.path)
