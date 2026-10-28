@@ -19,6 +19,11 @@ use sumcheck::packed::PackedShape;
 use trace::pbs_trace::PBSTrace;
 
 mod hadamard;
+/// Complete ordered PBS batches with joint cross-statement Hadamard authentication.
+pub mod batch;
+
+/// Complete joint-Hadamard batch and member protocol version.
+pub const BATCH_PROTOCOL_VERSION:u32=6;
 
 /// Complete packed-PBS wire/transcript protocol version.
 pub const PROTOCOL_VERSION: u32 = 2;
@@ -354,7 +359,30 @@ where
     B: decomp::Backend<F, H, C>,
     R: hadamard::Backend<F,H,C>,
 {
-    let version=if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
+    prove_inner::<F,H,C,B,R>(pp,setup,statement,trace,stats,None)
+}
+
+struct EvaluationWitness<F,H:Hash+Send+Sync> {
+    tables:Vec<PackedTable<F>>,
+    states:Vec<State<F,H>>,
+}
+
+fn prove_inner<F, H, C, B, R>(
+    pp: &Parameters<'_, C>,
+    setup: &ProverSetup<F, H>,
+    statement: &Statement<'_, F>,
+    trace: &PBSTrace<F>,
+    stats: &mut ProverStatistics,
+    retain: Option<&mut Option<EvaluationWitness<F,H>>>,
+) -> Result<Proof<F, H::Output, decomp::Proof<F, H::Output, B::Proof>, R::Proof>, Error>
+where
+    F: NTTField + Serialize,
+    H: Hash + Send + Sync,
+    C: RowCode<F> + Serialize,
+    B: decomp::Backend<F, H, C>,
+    R: hadamard::Backend<F,H,C>,
+{
+    let version=if R::BATCHED { BATCH_PROTOCOL_VERSION } else if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
     let timer = Instant::now();
     let cfg = &setup.verifier.config;
     pp.validate(cfg)?;
@@ -406,23 +434,26 @@ where
     let key = setup.br.oracles(pp.source).map_err(convert)?;
     stats.preparation += timer.elapsed();
     let timer = Instant::now();
-    let mut factors = Vec::with_capacity(4 * d + 1);
-    let mut roots = Vec::with_capacity(4 * d + 1);
-    let mut states = Vec::with_capacity(4 * d + 1);
-    for i in 0..2 * d {
-        for o in [&ev[i], &key[i]] {
-            factors.push(o.table.clone());
-            roots.push(o.commitment.clone());
-            states.push(o.state);
+    let hadamard=if R::BATCHED {
+        R::prove(&mut trans,&hadamard_shape(pp.source,2*d),pp.source,&[],&[],&[])?
+    } else {
+        let mut factors = Vec::with_capacity(4 * d + 1);
+        let mut roots = Vec::with_capacity(4 * d + 1);
+        let mut states = Vec::with_capacity(4 * d + 1);
+        for i in 0..2 * d {
+            for o in [&ev[i], &key[i]] {
+                factors.push(o.table.clone());
+                roots.push(o.commitment.clone());
+                states.push(o.state);
+            }
         }
-    }
-    factors.push(evaluation_tables[2 * d].clone());
-    roots.push(evaluations[2 * d].clone());
-    states.push(&ev_states[2 * d]);
-    let hadamard = R::prove(&mut trans, &hadamard_shape(pp.source, 2*d), pp.source,
-        &factors, &roots, &states)?;
-    stats.hadamard += timer.elapsed();
-    drop(factors);
+        factors.push(evaluation_tables[2 * d].clone());
+        roots.push(evaluations[2 * d].clone());
+        states.push(&ev_states[2 * d]);
+        R::prove(&mut trans, &hadamard_shape(pp.source, 2*d), pp.source,
+            &factors, &roots, &states)?
+    };
+    stats.hadamard+=timer.elapsed();
     let timer = Instant::now();
     let ntt_shape = ntt::Shape::new::<F, C>(pp.source, cfg.n).map_err(convert)?;
     let ntt = (0..count)
@@ -482,6 +513,9 @@ where
     )
     .map_err(convert)?;
     stats.key_switch += timer.elapsed();
+    if let Some(sink)=retain {
+        *sink=Some(EvaluationWitness {tables:evaluation_tables,states:ev_states});
+    }
     Ok(Proof {
         protocol_version: version,
         coefficients,
@@ -562,7 +596,7 @@ where
     B: decomp::Backend<F, H, C>,
     R: hadamard::Backend<F,H,C>,
 {
-    let version=if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
+    let version=if R::BATCHED { BATCH_PROTOCOL_VERSION } else if B::DEFERRED { DEFERRED_PROTOCOL_VERSION } else if R::AGGREGATED { AGGREGATED_PROTOCOL_VERSION } else if B::EXTENSION { EXTENSION_PROTOCOL_VERSION } else { PROTOCOL_VERSION };
     if proof.protocol_version
         != version
     {
@@ -731,6 +765,7 @@ where
         match version {
             PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS v2".as_slice(),
             EXTENSION_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS extension comparisons v3".as_slice(),
+            BATCH_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS joint batch member v6".as_slice(),
             DEFERRED_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS deferred lookup sources v5".as_slice(),
             AGGREGATED_PROTOCOL_VERSION => b"HasteBoots complete binary NAND PBS aggregated Hadamard v4".as_slice(),
             _ => return Err(error("unsupported complete PBS protocol version")),
