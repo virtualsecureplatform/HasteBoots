@@ -483,3 +483,6 @@ where
 fn convert(error: impl std::fmt::Display) -> Error {
     Error(error.to_string())
 }
+
+#[cfg(test)]
+pub(crate) mod audit;

@@ -73,7 +73,7 @@ fields, yielding eight additional decoded complete certificates.
 
 Version, count, endpoint, child-root and child-proof mutations are rejected.
 These are compatibility/tamper controls, not fresh complete malicious-trace
-certificates. A separate fresh complete accumulator-linkage, rotation and extraction audit covers
+certificates. A separate fresh complete key-product, accumulator-linkage, rotation and extraction audit covers
 both backends and fields; see `canonical-v10-fresh-linkage-audit.md`. Other attack
 classes and secure encrypted/original-size cases still require full version-10
 audit evidence. Existing component and legacy binding cases do not replace it.
