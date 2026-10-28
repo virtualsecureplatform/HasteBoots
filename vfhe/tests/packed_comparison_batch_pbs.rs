@@ -110,6 +110,19 @@ macro_rules! exercise {
                 assert_eq!(proof.hadamard.zero.instances.len(), count);
                 assert_eq!(proof.blind_rotation.len(), (2usize * count).div_ceil(4));
                 assert_eq!(proof.key_switch.len(), count.div_ceil(4));
+                let inventory = snarks::packed_root_inventory::comparison_batch_inventory(&proof);
+                assert_eq!(
+                    inventory.total(),
+                    count * if $width == 8 { 75 } else { 131 }
+                );
+                assert_eq!(
+                    inventory.blind_rotation_reciprocals,
+                    count * if $width == 8 { 8 } else { 16 }
+                );
+                assert_eq!(
+                    inventory.key_switch_reciprocals,
+                    count * if $width == 8 { 7 } else { 13 }
+                );
                 for member in &proof.members {
                     assert_eq!(member.protocol_version, 9);
                     assert!(
