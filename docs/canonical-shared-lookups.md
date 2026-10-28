@@ -28,8 +28,10 @@ contexts/roots remain transcript-bound. A later failure does not refund earlier
 helper or source openings. Private cryptographic randomness commits every helper.
 
 The standalone canonical lookups, legacy shared/deferred protocols and complete
-version-10 PBS format remain available unchanged. This component is not yet
-integrated into canonical radix decomposition or complete PBS. Memory grows
+version-10 PBS format remain available unchanged. Canonical radix decomposition
+now has a shared-comparison entry point; see
+`canonical-shared-decomposition.md`. Complete key-switch/PBS integration remains
+open. Memory grows
 with the number of reciprocal helpers; callers must bound native-size groups.
 The masked adapter still emits independent child PCS proofs. Shared algebra
 and fewer queries do not establish genuine 1/4/16 joint aggregation. Public

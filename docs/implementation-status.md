@@ -7,10 +7,16 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Canonical radix decomposition now groups all limb comparisons through one shared
+lookup point while retaining separate reconstruction and borrow-endpoint checks.
+Source/digit/borrow roots keep their original retained sessions. See
+`canonical-shared-decomposition.md`. Complete key-switch/PBS integration and the
+original security/performance gates remain open.
+
 Canonical shared-query extension lookups now support retained masked and ordinary
 source sessions, independent batched scalar equations and one terminal query per
 used root. Aliased slots reuse a checked claim; unused slots spend no allowance.
-See `canonical-shared-lookups.md`. Canonical decomposition/PBS integration,
+See `canonical-shared-lookups.md`. Complete key-switch/PBS integration,
 genuine joint aggregation and the original security/performance gates remain open.
 
 Fresh complete v10 key-product, linkage, rotation, extraction and canonicity

@@ -262,3 +262,6 @@ pub(crate) mod audit;
 
 #[cfg(test)]
 mod wire_tests;
+
+/// All limb comparisons share one scalar point and canonical terminal query.
+pub mod shared;

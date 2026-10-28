@@ -26,8 +26,9 @@ remain the same through reconstruction and neighboring limb comparisons; an
 oracle borrow cannot refresh their counters. Failures do not refund earlier
 openings. Source and helper budgets are trusted setup choices.
 
-This is per-limb extension comparison composition. Shared/deferred comparison
-aggregation and complete masked PBS proof composition remain unfinished. Public
+This per-limb path is integrated into complete version-10 PBS. An additional
+shared-comparison entry point is documented in `canonical-shared-decomposition.md`;
+its complete key-switch/PBS integration remains open. Public
 linear, lookup and multiplicity algebra remains exposed. No general hiding,
 robust vector proximity, whole-proof security certificate or new native
 performance/promotion claim follows from this integration.
