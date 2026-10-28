@@ -488,6 +488,12 @@ where
     )
     .map_err(convert)?;
     stats.monomial += timer.elapsed();
+    // Every blind-rotation relation now owns its proof messages. Only public
+    // roots and final_acc cross into key switching; release the private witness
+    // owners before allocating that independent stage's source codewords.
+    drop(factors);
+    drop((co, ev, input, ac));
+    drop((co_states, ev_states, in_states, ac_states));
     let timer = Instant::now();
     let ks_tables = ks::from_native(width, &trace.key_switching_trace).map_err(convert)?;
     let key_switch = D::key_switch(

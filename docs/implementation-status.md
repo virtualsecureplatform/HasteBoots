@@ -7,6 +7,13 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+The canonical prover now releases completed blind-rotation witness owners before
+allocating final key-switching sources. All four complete joint-backend proof
+profiles (versions 10/11, both fields) retain exact archived non-timing fields,
+including serialized proof hashes. Original key-owner lifetimes remain intact.
+See `canonical-witness-release.md`. Complete original-size masked PBS execution
+is being prepared separately; it is not yet verified.
+
 Original-size native masked key owners now pass resource validation in both
 fields with the original FHE constants and 128 sampling queries. Four isolated
 setups instantiate 88 owners and verify eight decoded openings. Retained and
