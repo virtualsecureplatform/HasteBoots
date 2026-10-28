@@ -33,6 +33,8 @@ pub mod packed_monomial;
 pub mod packed_ntt;
 /// Canonical committed-table references shared across packed relations.
 pub mod packed_oracle;
+/// Deferred authentication of caller-derived claims against canonical roots.
+pub mod packed_opening_batch;
 /// Experimental complete binary NAND PBS statement, proof and verifier API.
 pub mod packed_pbs;
 /// Root declarations in decoded complete packed proofs, for resource audits.
