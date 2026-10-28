@@ -21,6 +21,9 @@ fn main() {
     let extension = !std::env::args().any(|s| s == "--lanes");
     let aggregate_hadamard = std::env::args().any(|s| s == "--aggregate-hadamard");
     assert!(!aggregate_hadamard || extension, "aggregate Hadamard requires extension comparisons");
+    let defer_lookup_sources=std::env::args().any(|s|s=="--defer-lookup-sources");
+    assert!(!defer_lookup_sources || (extension && aggregate_hadamard),
+        "deferred lookup sources require extension comparisons and --aggregate-hadamard");
     let hadamard_backend = if aggregate_hadamard {"multi-root"} else {"independent"};
     let validation_batches = std::env::args().any(|s| s == "--validation-batches");
     assert!(
@@ -39,21 +42,25 @@ fn main() {
         .unwrap_or(1);
     assert!(iterations > 0);
     let repetitions = if extension { 1 } else { 16 };
-    let protocol_version = if aggregate_hadamard {
+    let protocol_version = if defer_lookup_sources {
+        pbs::DEFERRED_PROTOCOL_VERSION
+    } else if aggregate_hadamard {
         pbs::AGGREGATED_PROTOCOL_VERSION
     } else if extension {
         pbs::EXTENSION_PROTOCOL_VERSION
     } else {
         pbs::PROTOCOL_VERSION
     };
-    let transcript = if aggregate_hadamard {
+    let transcript = if defer_lookup_sources {
+        pbs::DEFERRED_TRANSCRIPT_ID
+    } else if aggregate_hadamard {
         pbs::AGGREGATED_TRANSCRIPT_ID
     } else if extension {
         pbs::EXTENSION_TRANSCRIPT_ID
     } else {
         pbs::TRANSCRIPT_ID
     };
-    let backend = if extension { "extension" } else { "lanes" };
+    let backend = if defer_lookup_sources {"deferred-extension"} else if extension { "extension" } else { "lanes" };
     let extension_degree = if extension { EF::D } else { 1 };
     let width = std::env::args()
         .position(|s| s == "--width")
@@ -281,7 +288,11 @@ fn main() {
             private_roots,
             ntt_links,
             proof_sha256,
-        ) = if aggregate_hadamard {
+        ) = if defer_lookup_sources {
+            certificate!(pbs::prove_deferred_with_statistics::<F, EF, Sha256, _>(&pp, &setup, &statement, &trace, &mut stats),
+            pbs::DeferredProof<F, EF, [u8;32]>,
+            |proof|pbs::verify_deferred::<F,EF,Sha256,_>(&pp,&verifier,&statement,proof))
+        } else if aggregate_hadamard {
             certificate!(pbs::prove_aggregated_with_statistics::<F, EF, Sha256, _>(&pp, &setup, &statement, &trace, &mut stats),
             pbs::AggregatedProof<F, EF, [u8; 32]>,
             |proof| pbs::verify_aggregated::<F, EF, Sha256, _>(&pp, &verifier, &statement, proof))

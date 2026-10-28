@@ -59,6 +59,7 @@ where
 {
     type Proof = lookup::Proof<F, EF, H::Output>;
     const EXTENSION: bool = true;
+    const DEFERRED: bool = true;
     fn bind_domain(trans: &mut Transcript<F>) {
         trans.append_message(b"canonical deferred extension decomposition v1", &EF::D);
     }

@@ -30,6 +30,9 @@ impl<F, O> LookupRoots for packed_lane_lookup::Proof<F, O> {
 impl<F: Field, EF: Field, O> LookupRoots for packed_extension_lookup::Proof<F, EF, O> {
     fn reciprocal_roots(&self) -> usize { self.reciprocal_commitments.len() }
 }
+impl<F:Field,EF:Field,O> LookupRoots for packed_extension_lookup::deferred::Proof<F,EF,O> {
+    fn reciprocal_roots(&self)->usize {self.lookups.iter().map(LookupRoots::reciprocal_roots).sum()}
+}
 impl<F, O> LookupRoots for packed_tuple_lookup::Proof<F, O> {
     fn reciprocal_roots(&self) -> usize { self.reciprocal_commitments.len() }
 }
