@@ -136,12 +136,20 @@ pub mod prime64 {
 
         #[inline]
         fn transform_slice(&self, polynomial_slice: &mut [F]) {
+            // Field arithmetic may retain lazy representatives, but the
+            // concrete integer kernel requires residues below the modulus.
+            for value in polynomial_slice.iter_mut() {
+                *value = value.canonicalized();
+            }
             self.plan
                 .fwd(unsafe { transmute::<&mut [F], &mut [u64]>(polynomial_slice) });
         }
 
         #[inline]
         fn inverse_transform_slice(&self, ntt_polynomial_slice: &mut [F]) {
+            for value in ntt_polynomial_slice.iter_mut() {
+                *value = value.canonicalized();
+            }
             let values = unsafe { transmute::<&mut [F], &mut [u64]>(ntt_polynomial_slice) };
             self.plan.inv(values);
             self.plan.normalize(values);
