@@ -3,7 +3,8 @@
 //! One retained extension-field source defines one base projection. Dummy high
 //! variables preserve logical shapes while providing explicit mask capacity.
 //! Multi-query calls enforce one private lifetime atomically; they currently
-//! contain individual direct openings, not a new cross-query aggregation proof.
+//! contain individual direct openings. The explicit joint API shares original
+//! source proximity; query-specific masked ladders remain separate.
 use crate::{
     matrix_weighted::Commitment, packed_polyfrim::authenticated::masked as core, utils::hash::Hash,
 };
@@ -15,7 +16,10 @@ use algebra::{
 use helper::{FiatShamirTranscript, Transcript};
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
+
+/// Explicit original-source-sharing batches; independent openings stay unchanged.
+pub mod joint;
 
 /// Invalid geometry, source, claim, private lifetime or rejected proof.
 #[derive(Debug, thiserror::Error)]
@@ -275,6 +279,41 @@ where
         );
         child
     }
+    // One lock guards the common root/context, complete allowance and every
+    // actual logical claim before either opening API mutates the parent.
+    fn opening_session<'a, H: Hash + Send + Sync>(
+        &self,
+        commitment: &Commitment<H::Output>,
+        state: &'a State<F, EF, H>,
+        queries: &[Vec<MatrixPair<F>>],
+        values: &[Vec<F>],
+    ) -> Result<MutexGuard<'a, core::ProverSession<EF, H>>, Error> {
+        if state.context != self.context_digest::<H>() || state.root != commitment.root {
+            return Err(Error("source context or root"));
+        }
+        let session = state
+            .session
+            .lock()
+            .map_err(|_| Error("poisoned private mask session"))?;
+        let first = session.spent();
+        if first
+            .checked_add(queries.len())
+            .is_none_or(|n| n > self.max_openings())
+        {
+            return Err(Error("insufficient private mask lifetime"));
+        }
+        for (query, value) in queries.iter().zip(values) {
+            if state
+                .table
+                .evaluate(query)
+                .map_err(|_| Error("source evaluation"))?
+                != *value
+            {
+                return Err(Error("false ordered source claim"));
+            }
+        }
+        Ok(session)
+    }
     /// Atomically preflight every claim and the complete mask allowance before
     /// publishing anything. One lock covers all openings; no budget is refreshed.
     pub fn open_many<H: Hash + Send + Sync>(
@@ -286,30 +325,8 @@ where
         values: &[Vec<F>],
     ) -> Result<Proof<EF, H::Output>, Error> {
         let (queries, values) = self.claims(queries, values)?;
-        if state.context != self.context_digest::<H>() || state.root != commitment.root {
-            return Err(Error("source context or root"));
-        }
-        let mut session = state
-            .session
-            .lock()
-            .map_err(|_| Error("poisoned private mask session"))?;
+        let mut session = self.opening_session::<H>(commitment, state, &queries, &values)?;
         let first = session.spent();
-        if first
-            .checked_add(queries.len())
-            .is_none_or(|n| n > self.max_openings())
-        {
-            return Err(Error("insufficient private mask lifetime"));
-        }
-        for (query, value) in queries.iter().zip(&values) {
-            if state
-                .table
-                .evaluate(query)
-                .map_err(|_| Error("source evaluation"))?
-                != *value
-            {
-                return Err(Error("false ordered source claim"));
-            }
-        }
         let mut child = self.begin::<H>(parent, &commitment.root, &queries, &values, first);
         let mut openings = Vec::with_capacity(queries.len());
         for (i, (query, value)) in queries.iter().zip(&values).enumerate() {

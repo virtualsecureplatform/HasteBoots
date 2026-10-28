@@ -7,6 +7,15 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+An opt-in masked joint-source API now shares one original-source proximity
+certificate across ordered 1/4/16-query batches. Each query retains its own
+masked ladder and consumes its original allowance. Both core and base adapter
+verify decoded batches and enforce one lifetime across independent/joint calls.
+Sixteen-query component packets are 16.7–20.2% smaller with faster proving in
+both execution orders. See `joint-source-proximity.md` and
+`masked-joint-adapter.md`. Full query/FRI aggregation, canonical backend/PBS
+integration, original-size/security, hiding and promotion remain open.
+
 Two serial complete encrypted masked-PBS profile processes now verify eight
 version-10/11 proofs and 3,924 actual child openings. All complete proof hashes
 reproduce exactly. The version-11 timing gain is only 1.0–2.1% for BabyBear and
