@@ -1,11 +1,22 @@
 // Select the Hadamard certificate while leaving key-switch product proofs on
 // their original backend. These helpers exist only in adversarial test modules.
 macro_rules! audit_decomposition_type {
+    (Joint,$extension:ty) => {decomp::deferred::Proof<F,$extension,[u8;32]>};
     (Deferred,$extension:ty) => {decomp::deferred::Proof<F,$extension,[u8;32]>};
     ($kind:ident) => { decomp::LaneProof<F,[u8;32]> };
     ($kind:ident,$extension:ty) => { decomp::ExtensionProof<F,$extension,[u8;32]> };
 }
 macro_rules! audit_hadamard_helpers {
+    (Joint,$extension:ty) => {
+        type HadamardProof=();
+        fn hadamard_with_declared_roots(prover:&mut Transcript<F>,reference:&mut Transcript<F>,
+            _pp:&Parameters<C>,_shape:&PackedShape<F>,_factors:&[PackedTable<F>],
+            _actual:&[Commitment<[u8;32]>],_states:&[&State<F,Sha256>],_declared:&[Commitment<[u8;32]>]) {
+            prover.append_message(b"packed PBS joint batch Hadamard obligation",&());
+            reference.append_message(b"packed PBS joint batch Hadamard obligation",&());
+        }
+    };
+
     (Deferred,$extension:ty) => {audit_hadamard_helpers!(Aggregated,$extension);};
     (Independent $(,$extension:ty)?) => {
         type HadamardProof=relation::RelationProof<F,[u8;32]>;
@@ -38,6 +49,82 @@ macro_rules! audit_hadamard_helpers {
         }
     };
 }
+// Joint fixtures obtain a checked honest member through the public batch API;
+// there is no standalone production verifier for the partial member format.
+macro_rules! audit_honest_member {
+    (Joint,$prove:ident,$verify:ident,$pp:expr,$setup:expr,$expected:expr,$statement:expr,$trace:expr,$extension:ty) => {{
+        let statements=[$statement.clone()];
+        let mut proof=pbs::batch::prove::<F,$extension,Sha256,_>($pp,$setup,&statements,&[$trace]).unwrap();
+        pbs::batch::verify::<F,$extension,Sha256,_>($pp,$expected,&statements,&proof).unwrap();
+        proof.members.remove(0)
+    }};
+    ($kind:ident,$prove:ident,$verify:ident,$pp:expr,$setup:expr,$expected:expr,$statement:expr,$trace:expr $(,$extension:ty)?) => {{
+        let proof=pbs::$prove::<F,$($extension,)? Sha256,_>($pp,$setup,$statement,$trace).unwrap();
+        pbs::$verify::<F,$($extension,)? Sha256,_>($pp,$expected,$statement,&proof).unwrap();proof
+    }};
+}
+macro_rules! audit_prepare_joint_anchor {
+    (Joint,$evaluations:expr,$key:expr,$count:expr) => {{
+        let mut factors=Vec::new();let mut roots=Vec::new();let mut states=Vec::new();
+        for i in 0..$count {
+            factors.push($evaluations.tables[i].clone());roots.push($evaluations.roots[i].clone());states.push(&$evaluations.states[i]);
+            factors.push($key[i].table.clone());roots.push($key[i].commitment.clone());states.push($key[i].state);
+        }
+        factors.push($evaluations.tables[$count].clone());roots.push($evaluations.roots[$count].clone());states.push(&$evaluations.states[$count]);
+        (factors,roots,states)
+    }};
+    ($kind:ident,$evaluations:expr,$key:expr,$count:expr) => {()};
+}
+macro_rules! audit_verify_full {
+    (Joint,$verify:ident,$pp:expr,$expected:expr,$statement:expr,$forged:expr,$contexts:expr,
+        $factors:expr,$actual:expr,$states:expr,$declared:expr,$anchor_statement:expr,$anchor:expr,$anchor_sources:expr,$use_anchor:expr,$malicious_last:expr,$extension:ty) => {{
+        let mut statements=vec![$statement.clone()];let mut members=vec![$forged];
+        let mut actual=vec![$actual.clone()];let mut declared=vec![$declared.clone()];
+        let mut factor_slices=vec![$factors.as_slice()];let mut state_slices=vec![$states.as_slice()];
+        if $use_anchor {
+            let at=if $malicious_last {0} else {1};
+            statements.insert(at,$anchor_statement.clone());members.insert(at,$anchor.clone());
+            actual.insert(at,$anchor_sources.1.clone());declared.insert(at,$anchor_sources.1.clone());
+            factor_slices.insert(at,$anchor_sources.0.as_slice());state_slices.insert(at,$anchor_sources.2.as_slice());
+        }
+        let shape=product_shape($pp.source,($factors.len()-1)/2);let shapes=vec![shape;members.len()];
+        let degree=<$extension as algebra::AbstractExtensionField<F>>::D;
+        let start=|| {
+            let mut t=Transcript::new_direct();
+            t.append_message(b"HasteBoots complete binary NAND PBS joint Hadamard batch v6",
+                &(pbs::BATCH_PROTOCOL_VERSION,degree,$expected,$contexts,&statements,&declared));
+            t.append_message(b"HasteBoots shared-challenge packed relations v1",
+                &(&shapes,$pp.source.context_digest::<F,Sha256>().unwrap(),degree,&declared));t
+        };
+        let mut prover=start();let mut reference=start();
+        let (zero,claims,values)=packed_zero::batch::prove(&mut prover,&shapes,&factor_slices).unwrap();
+        let checked=packed_zero::batch::verify(&mut reference,&shapes,&zero).unwrap();
+        for ((shape,claim),values) in shapes.iter().zip(&checked).zip(&values) {claim.check(shape,values).unwrap();}
+        prover.append_message(b"packed batch relation terminal values",&values);
+        reference.append_message(b"packed batch relation terminal values",&values);
+        let actual:Vec<_>=actual.iter().flatten().cloned().collect();
+        let states:Vec<_>=state_slices.iter().flat_map(|s|s.iter().copied()).collect();
+        let flat_values:Vec<_>=values.iter().flatten().cloned().collect();
+        let opening=pcs::matrix_weighted::aggregate::prove::<F,$extension,Sha256,_>($pp.source,&mut prover,&actual,&states,&claims[0].query,&flat_values).unwrap();
+        pcs::matrix_weighted::aggregate::verify::<F,$extension,Sha256,_>($pp.source,&mut reference,&actual,&checked[0].query,&flat_values,&opening).unwrap();
+        assert_eq!(prover.get_challenge(b"after genuine joint forgery"),reference.get_challenge(b"after genuine joint forgery"));
+        let proof=pbs::batch::Proof {protocol_version:pbs::BATCH_PROTOCOL_VERSION,members,hadamard:relation::batch::Proof {zero,values,opening}};
+        let bytes=bincode::serde::encode_to_vec(&proof,bincode::config::standard()).unwrap();
+        let (proof,used):(pbs::batch::Proof<F,$extension,[u8;32]>,_)=bincode::serde::decode_from_slice(&bytes,bincode::config::standard()).unwrap();assert_eq!(used,bytes.len());
+        pbs::batch::verify::<F,$extension,Sha256,_>($pp,$expected,&statements,&proof)
+    }};
+    ($kind:ident,$verify:ident,$pp:expr,$expected:expr,$statement:expr,$forged:expr,$contexts:expr,
+        $factors:expr,$actual:expr,$states:expr,$declared:expr,$anchor_statement:expr,$anchor:expr,$anchor_sources:expr,$use_anchor:expr,$malicious_last:expr $(,$extension:ty)?) => {
+        pbs::$verify::<F,$($extension,)? Sha256,_>($pp,$expected,$statement,&$forged)
+    };
+}
+macro_rules! audit_joint_case_scope {
+    (Joint,$attack:expr,$accepted:expr,$use_anchor:expr,$malicious_last:expr) => {
+        let members=if $use_anchor {2} else {1};let malicious_index=usize::from($use_anchor && $malicious_last);
+        eprintln!("HB_JOINT_BINDING_CASE {{\"protocol_version\":6,\"prime\":{},\"attack\":\"{:?}\",\"members\":{members},\"malicious_index\":{malicious_index},\"reference_scope\":\"fresh-member-children-and-joint-actual-root-openings\",\"production_accepted\":{}}}",F::MODULUS_VALUE,$attack,$accepted);
+    };
+    ($kind:ident,$attack:expr,$accepted:expr,$use_anchor:expr,$malicious_last:expr) => {};
+}
 // This fixture deliberately reconstructs the public protocol from component
 // APIs. It is a malicious prover, not a call to pbs::prove with altered input.
 macro_rules! complete_foreign_trace_case {
@@ -49,6 +136,10 @@ macro_rules! complete_foreign_trace_case {
     };
     (@deferred $module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr, $extension:ty) => {
         complete_foreign_trace_case!(@backend Deferred,$module,$field,$prove,$verify,$pbs_prove,$pbs_verify,$version,$domain,$width,$repetitions,$extension);
+    };
+    (@joint $module:ident,$field:ty,$extension:ty,$width:expr) => {
+        complete_foreign_trace_case!(@backend Joint,$module,$field,prove_deferred,verify_deferred,prove_deferred,verify_deferred,
+            pbs::BATCH_PROTOCOL_VERSION,b"HasteBoots complete binary NAND PBS joint batch member v6",$width,1,$extension);
     };
     (@backend $kind:ident,$module:ident, $field:ty, $prove:ident, $verify:ident, $pbs_prove:ident, $pbs_verify:ident, $version:expr, $domain:literal, $width:expr, $repetitions:expr $(, $extension:ty)?) => {
         mod $module {
@@ -544,14 +635,7 @@ macro_rules! complete_foreign_trace_case {
                     output_a: out.a(),
                     output_b: out.b(),
                 };
-                let honest = pbs::$pbs_prove::<F, $($extension,)? Sha256, _>(
-                    &pp, &setup, &actual, &trace,
-                )
-                .unwrap();
-                pbs::$pbs_verify::<F, $($extension,)? Sha256, _>(
-                    &pp, &expected, &actual, &honest,
-                )
-                .unwrap();
+                let honest=audit_honest_member!($kind,$pbs_prove,$pbs_verify,&pp,&setup,&expected,&actual,&trace $(,$extension)?);
                 trace.blind_rotation_trace.finalize(lwe);
                 let columns = relation::coefficients_from_sum_hadamard(
                     width,
@@ -729,20 +813,7 @@ macro_rules! complete_foreign_trace_case {
                     output_a: alternate_output.a(),
                     output_b: alternate_output.b(),
                 };
-                let alternate_honest = pbs::$pbs_prove::<F, $($extension,)? Sha256, _>(
-                    &pp,
-                    &setup,
-                    &alternate_statement,
-                    &alternate_trace,
-                )
-                .unwrap();
-                pbs::$pbs_verify::<F, $($extension,)? Sha256, _>(
-                    &pp,
-                    &expected,
-                    &alternate_statement,
-                    &alternate_honest,
-                )
-                .unwrap();
+                let alternate_honest=audit_honest_member!($kind,$pbs_prove,$pbs_verify,&pp,&setup,&expected,&alternate_statement,&alternate_trace $(,$extension)?);
                 alternate_trace.blind_rotation_trace.finalize(lwe);
                 let alternate_co = Sources::new(
                     pp.source,
@@ -818,6 +889,7 @@ macro_rules! complete_foreign_trace_case {
                     Chain,
                     DuplicateView,
                 }
+                let _joint_anchor=audit_prepare_joint_anchor!($kind,alternate_ev,key_o,2*d);
                 for attack in [
                     Attack::Control,
                     Attack::InputMask,
@@ -977,6 +1049,7 @@ macro_rules! complete_foreign_trace_case {
                         &states,
                         &declared,
                     );
+                    let _joint_hadamard_factors=&factors;
                     let ntt_shape = ntt::Shape::new::<F, _>(pp.source, n).unwrap();
                     let mut ntt_proofs = Vec::new();
                     for i in 0..2 * d + 1 {
@@ -1175,9 +1248,11 @@ macro_rules! complete_foreign_trace_case {
                     let (forged, used): (FullProof, _) =
                         bincode::serde::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
                     assert_eq!(used, bytes.len());
-                    let result = pbs::$pbs_verify::<F, $($extension,)? Sha256, _>(
-                        &pp, &expected, statement, &forged,
-                    );
+                    let result=audit_verify_full!($kind,$pbs_verify,&pp,expected,statement,forged,&contexts,
+                        _joint_hadamard_factors,roots,states,declared,&alternate_statement,&alternate_honest,_joint_anchor,
+                        !matches!(attack,Attack::BlindKey|Attack::SwitchKey),
+                        matches!(attack,Attack::InputMask|Attack::OutputBody|Attack::OutputA|Attack::FinalEndpoint)
+                        $(,$extension)?);
                     let production_accepted = result.is_ok();
                     match attack {
                         Attack::Control => result.unwrap(),
@@ -1212,6 +1287,9 @@ macro_rules! complete_foreign_trace_case {
                             );
                         }
                     }
+                    audit_joint_case_scope!($kind,attack,production_accepted,
+                        !matches!(attack,Attack::BlindKey|Attack::SwitchKey),
+                        matches!(attack,Attack::InputMask|Attack::OutputBody|Attack::OutputA|Attack::FinalEndpoint));
                     eprintln!(
                         "HB_BINDING_CASE {{\"protocol_version\":{},\"prime\":{},\"attack\":\"{:?}\",\"reference_scope\":\"local-algebra-and-actual-root-openings\",\"production_accepted\":{}}}",
                         $version,

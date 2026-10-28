@@ -255,3 +255,9 @@ exercise!(
     4,
     0
 );
+
+include!("support/packed_pbs_forgery.rs");
+complete_foreign_trace_case!(@joint complete_joint_foreign_trace_babybear,
+    algebra::BabyBear,algebra::BabyBearExtension6,8);
+complete_foreign_trace_case!(@joint complete_joint_foreign_trace_goldilocks,
+    algebra::Goldilocks,algebra::GoldilocksExtension3,4);
