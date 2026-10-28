@@ -7,12 +7,36 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Shared scalar sumcheck now borrows the first round and pools folded sources by
+immutable object identity. All four scalar-batch tests compare against independent
+per-equation behavior, including byte-exact reference proofs; all fifty SNARK
+unit tests pass. This removes redundant helper state copies/folds without merging
+equations or changing the wire protocol. All 62 selected Rust tests pass, including complete v8/v9 integration and
+bounded decomposition batches. All 210 toy wire-controlled member instances remain byte/hash exact across
+versions 5–9. Exact pooled native wire validation is running under
+`target/performance/scalar-shared-fold-native/`; paired performance measurements
+remain open; see `shared-scalar-folds.md`.
+
+Ten fresh complete-v9 helper-binding certificates now pass: two controls accepted
+and eight foreign-helper attacks rejected across both stages/member positions.
+All actual-root openings and other equations pass local reference checks. These
+small zero-key algebraic fixtures do not close every whole-v9 adversarial scenario.
+See `packed-comparison-batches.md` and `target/performance/comparison-batch-audit/`.
+
 Version 9 now composes shared comparisons across complete PBS statements with
 mandatory outer Hadamard, blind-rotation and key-switch packets. Ten selected
 release tests pass, including 52 decoded v9 members over both fields. Its trusted
 grouping, ownership and remaining validation gates are documented in
-`packed-comparison-batches.md`. Native validation and whole-v9 security accounting
-remain open.
+`packed-comparison-batches.md`. Digest-linked whole-v9 root inventories now
+include outer helpers, and the
+strict log validator checks the trusted group schedule. All 89 Python checks and
+two updated integration fixtures pass. Twelve v6/v7 toy wire controls remain
+exact; six new v9 toy packets verify 42 member instances. Original-size frozen
+validation now completes all six v9 certificates, covering 42 fresh statements
+with archived fixtures matched under `target/performance/comparison-batches-native/`.
+At sixteen members, bytes fall 14.17%/27.31% versus v7; observed process peaks
+are 27,624,876/76,602,808 KiB. These are pre-pooling correctness results, not
+paired timing or whole-security matching. Reviewed whole-v9 security remains open.
 
 Paired native v5/v8 timing completed sixteen decoded proofs in two execution
 orders without overlapping builds/tests. Complete latency improves only

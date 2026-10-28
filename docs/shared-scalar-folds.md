@@ -28,8 +28,14 @@ scalar-batch tests pass over BabyBear sextic and Goldilocks cubic, with n=1/3,
 objects. New reference fixtures compare exact proof bytes, post-proof transcript
 challenges and terminal states. All fifty SNARK unit tests also pass, including
 lookup/decomposition source-binding attacks and fresh complete-v9 helper attacks.
-Complete integration, frozen-wire and original-size pooled validation are being
-recorded under `target/performance/scalar-shared-fold/`.
+All 62 selected Rust tests pass: four scalar-batch tests, fifty SNARK unit tests,
+six complete v8/v9 integration tests and two bounded decomposition fixtures.
+All 210 toy wire-controlled member instances retain archived bytes/hashes:
+84 standalone v5/v8 controls and 126 member instances across complete v6/v7/v9
+batch controls. A separate original-size repeat now requires exact pre-pooling
+v9 bytes/hashes as well as public verification at 1/4/16. That run is active
+under `target/performance/scalar-shared-fold-native/`; tests, source archives,
+binaries and wire-control evidence are recorded under `target/performance/scalar-shared-fold/`.
 
 This optimization adds no algebraic compression and does not close the existing
 Fiat–Shamir, hash, hiding, whole-security or promotion gates. Native v9 evidence

@@ -35,8 +35,68 @@ outcomes, including their reconstructed malicious/control certificates.
 Source archives, the command and the terminal test log are under
 `target/performance/comparison-batches/`.
 
-This is an experimental non-hiding format. Fresh reconstructed whole-v9 malicious
-certificates, original-size 1/4/16 runs, precise whole-v9 root/security accounting,
-byte comparisons and paired complete timing remain to be done. Existing component
+## Root and conditional error accounting
+
+`packed_root_inventory::comparison_batch_inventory` counts member declarations
+and outer helper declarations separately, after public verification. At batch
+size B the BabyBear profile has 60B member slots, 8B blind-rotation helpers and
+7B key-switch helpers (75B total). Goldilocks has 102B, 16B and 13B respectively
+(131B total). It does not report a partial member as a complete root inventory.
+Trusted key roots and authentication siblings are excluded, as in earlier formats.
+The Rust fixture checks these counts on all eight decoded 1/4/5/16 certificates.
+
+The native example now selects this format with `--joint-comparisons`, mutually
+exclusive with `--separate` and `--canonical-sources`. It emits the actual outer
+helper counts and the trusted group schedule. `validate_joint_pbs_batches.py`
+requires these fields and rejects changed or missing counts, contexts and groups.
+For its conditional interactive budget it retains B complete v8 inventories.
+There are exactly 2*(ceil(2B/4)+ceil(B/4)) lookup authentication cancellations,
+at most the retained 6B full-extension cancellation terms. Every scalar and
+packed relation equation remains independent. The old per-root fixed-word terms
+are retained conservatively, under the same unreviewed availability/RS assumptions
+as the component analysis; this is not a whole-proof security certificate.
+All 89 Python checks and both updated root-inventory integration fixtures pass.
+
+`tools/run_comparison_batch_validation.py` runs frozen binaries serially, checks
+v6/v7 toy wire compatibility, validates fresh v9 1/4/16 certificates, and optionally
+runs original-size certificates with exact archived statement/key/parameter/layout
+matches. It writes commands, child PIDs, start ticks, immutable log hashes and a
+terminal status. The current native session is under
+`target/performance/comparison-batches-native/`, with build sources/binaries under
+`target/performance/comparison-batch-native-build/`. Its six toy runs pass:
+twelve v6/v7 controls (84 member instances) are wire-exact, and six v9 packets
+verify 42 member instances. Original-size validation now completes all six
+certificates, covering 42 fresh ring-1024/LWE-728 statements across both fields.
+All archived native statements, keys, parameters and four PCS layouts match.
+At sixteen members, BabyBear uses 4,707,873,888 bytes versus v7's 5,484,939,929
+(14.17% lower); Goldilocks uses 5,833,344,537 versus 8,024,735,049 (27.31% lower).
+Observed process peaks are 27,624,876 and 76,602,808 KiB respectively. These
+correctness-run timings/resources are not paired performance evidence.
+The conditional 42-member interactive union inventory is 129.32427 bits,
+not a whole-proof security certificate. This native run uses the pre-pooling
+build; the subsequent scalar-fold optimization has separate validation artifacts.
+
+## Fresh helper-source binding audit
+
+Ten complete reconstructed certificates pass their expected outcomes: two
+controls are accepted and eight foreign-helper attacks are rejected. Each has
+two complete members. Every NTT/reconstruction/accumulator/monomial/key-switch
+child, outer Hadamard proof and lookup packet is generated afresh. Local replay
+checks every member, the joint Hadamard relation, each scalar recurrence and
+openings of the actual declared source/helper roots. The malicious helpers use
+a different canonical digit/borrow string for the first or last member, in the
+blind-rotation or key-switch stage. Public verification rejects its reciprocal
+identity against the authenticated source values.
+
+These fixtures use zero evaluation keys, identity rotations and an exact constant
+accumulator at ring dimension 32/LWE dimension 21. They isolate helper binding;
+they are not native secure-key fixtures or false-output/key-splice attacks. No
+honest-proof transcript replay is used. Logs, validated source archives and the
+ten digest-checked case records are under `target/performance/comparison-batch-audit/`.
+
+This is an experimental non-hiding format. Remaining whole-v9 adversarial
+scenarios include false public outputs/keys and spliced accumulator endpoints.
+Reviewed whole-v9 security accounting and paired complete timing remain to be
+done. The scalar-fold build is undergoing its own exact native wire validation. Existing component
 forgery results and v8 native evidence do not close these v9 gates. Whole-proof
 Fiat–Shamir/hash security, direct packed hiding FRI and final promotion remain open.

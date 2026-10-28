@@ -26,6 +26,7 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--build-directory", type=Path, required=True)
     parser.add_argument("--native", action="store_true")
+    parser.add_argument("--comparison-reference-directory", type=Path, help="also require exact v9 bytes/hashes against a previous validated run")
     args = parser.parse_args()
     output = args.output.resolve()
     build = args.build_directory.resolve()
@@ -75,8 +76,14 @@ def main():
             reference = ROOT / "target/performance" / ("deferred-pbs-native-fresh" if full else "deferred-pbs") / (field + ".log" if full else f"toy-{field}-fresh.log")
             result = validate(log.read_text(), field, full=full, mode=mode, reference_text=reference.read_text())
             result.update(log_sha256=sha(log), reference_sha256=sha(reference))
-            if mode != "joint-comparisons":
+            if mode != "joint-comparisons" or args.comparison_reference_directory is not None:
                 wire_reference = ROOT / "target/performance/shared-fold-pbs" / f"{field}-{mode}.log"
+                if mode=="joint-comparisons":
+                    prior=args.comparison_reference_directory.resolve()
+                    prior_status=json.loads((prior/"status.json").read_text())
+                    assert prior_status["terminal"] and prior_status["exit_code"]==0
+                    wire_reference=prior/(name+".log")
+                    validate(wire_reference.read_text(),field,full=full,mode=mode,reference_text=reference.read_text())
                 old = [json.loads(line.split(" ", 1)[1]) for line in wire_reference.read_text().splitlines() if line.startswith("HB_FULL_BATCH_PBS ")]
                 assert len(old) == len(result["packets"]) == 3
                 for new, prior in zip(result["packets"], old):
