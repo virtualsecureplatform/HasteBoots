@@ -398,7 +398,7 @@ pub(crate) fn constant_interpolations<F: Field>(
 
 pub(crate) fn round_evaluations<F: PrimeField>(
     shape: &PackedShape<F>,
-    tables: &[PackedTable<F>],
+    tables: &[impl std::borrow::Borrow<PackedTable<F>> + Sync],
     suffixes: usize,
     degree: usize,
 ) -> Vec<F> {
@@ -421,6 +421,7 @@ pub(crate) fn round_evaluations<F: PrimeField>(
             },
             |(mut total, mut interpolated, mut scratch), b| {
                 for (i, (table, values)) in tables.iter().zip(&mut interpolated).enumerate() {
+                    let table = table.borrow();
                     if cached[i].is_some() {
                         continue;
                     }

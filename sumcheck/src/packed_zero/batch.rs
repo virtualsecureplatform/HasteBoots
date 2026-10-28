@@ -119,19 +119,30 @@ pub fn prove_borrowed<F: PrimeField + Serialize>(
         .iter()
         .map(PackedShape::validate)
         .collect::<Result<Vec<_>, _>>()?;
-    let mut tables: Vec<Vec<_>> = factors
-        .iter()
-        .zip(shapes)
-        .zip(&equalities)
-        .map(|((f, s), e)| {
-            let mut folded = f
-                .iter()
-                .map(|t| t.fold(&pair).map_err(shape_error))
-                .collect::<Result<Vec<_>, _>>()?;
-            folded.push(mixed_equality(s, e, &mixing)?);
-            Ok(folded)
-        })
-        .collect::<Result<_, Error>>()?;
+    // Pointer identity is only an in-memory optimization for immutable inputs.
+    // No alias map is accepted from the proof, and every equation/equality
+    // remains separate. Distinct objects are never merged by claimed values.
+    let mut sources = std::collections::HashMap::new();
+    let mut tables = Vec::new();
+    let mut routes = Vec::with_capacity(factors.len());
+    for ((factors, shape), equality) in factors.iter().zip(shapes).zip(&equalities) {
+        let mut route = Vec::with_capacity(factors.len() + 1);
+        for &factor in *factors {
+            let identity = std::ptr::from_ref(factor);
+            let slot = if let Some(&slot) = sources.get(&identity) {
+                slot
+            } else {
+                let slot = tables.len();
+                tables.push(factor.fold(&pair).map_err(shape_error)?);
+                sources.insert(identity, slot);
+                slot
+            };
+            route.push(slot);
+        }
+        route.push(tables.len());
+        tables.push(mixed_equality(shape, equality, &mixing)?);
+        routes.push(route);
+    }
     let mut instances: Vec<_> = first
         .into_iter()
         .map(|first| ZeroProof {
@@ -143,9 +154,12 @@ pub fn prove_borrowed<F: PrimeField + Serialize>(
         let suffixes = 1usize << (reduced[0].num_vars - round - 1);
         let messages: Vec<_> = reduced
             .iter()
-            .zip(&tables)
+            .zip(&routes)
             .zip(&reduced_degrees)
-            .map(|((s, t), &degree)| packed::round_evaluations(s, t, suffixes, degree))
+            .map(|((s, route), &degree)| {
+                let factors: Vec<_> = route.iter().map(|&slot| &tables[slot]).collect();
+                packed::round_evaluations(s, &factors, suffixes, degree)
+            })
             .collect();
         for (message, claim) in messages.iter().zip(&expected) {
             packed::check_round(shapes[0].width, message, claim)?;
@@ -154,29 +168,27 @@ pub fn prove_borrowed<F: PrimeField + Serialize>(
         let r =
             trans.get_vec_challenge(b"packed batch zero independent challenges", shapes[0].width);
         let pair = packed::challenge_pair(&r).map_err(shape_error)?;
-        for (((instance, tables), message), claim) in instances
-            .iter_mut()
-            .zip(&mut tables)
-            .zip(messages)
-            .zip(&mut expected)
-        {
+        for ((instance, message), claim) in instances.iter_mut().zip(messages).zip(&mut expected) {
             *claim = r
                 .iter()
                 .map(|&r| interpolate_uni_poly(&message, r))
                 .collect();
-            tables
-                .par_iter_mut()
-                .try_for_each(|t| t.fold_in_place(&pair).map_err(shape_error))?;
             instance.rest.rounds.push(message);
         }
+        tables
+            .par_iter_mut()
+            .try_for_each(|t| t.fold_in_place(&pair).map_err(shape_error))?;
         query.push(pair);
     }
     let mut subclaims = Vec::new();
     let mut values = Vec::new();
-    for (((shape, tables), expected), reduced) in
-        shapes.iter().zip(tables).zip(expected).zip(&reduced)
+    for (((shape, route), expected), reduced) in
+        shapes.iter().zip(&routes).zip(expected).zip(&reduced)
     {
-        let mut terminal: Vec<_> = tables.iter().map(|t| t.values().to_vec()).collect();
+        let mut terminal: Vec<_> = route
+            .iter()
+            .map(|&slot| tables[slot].values().to_vec())
+            .collect();
         if reduced.evaluate(&terminal)? != expected {
             return Err(reject("false packed batch terminal claim"));
         }
