@@ -7,6 +7,16 @@ baseline bytes, and >=10% complete single-PBS latency improvement confirmed twic
 
 ## Current evidence
 
+Streamed canonical decomposition batches now share comparisons across trusted
+groups of at most four independent members. Reconstruction/endpoints remain
+individual, while borrow states move into a group owner and are released after
+its comparisons. Decoded 1/4/5/16 tests pass over both selected fields, with mixed
+radices, repetitions and logical prefixes. Six reconstructed batch certificates
+pass (two controls accepted, four noncanonical-digit attacks rejected), as do
+seventeen targeted Rust tests and all 84 current v5/v8 wire controls. This is a
+component for complete cross-statement PBS integration, which remains unfinished.
+See `batched-decompositions.md`.
+
 Complete opt-in version 8 now uses shared-query comparisons in both
 blind-rotation decompositions and final key switching, while retaining all
 other PBS constraints and the original output key. Twenty-five targeted Rust
@@ -14,8 +24,9 @@ tests and 88 Python checks pass, including 42 fresh decoded v8 test certificates
 and twenty reconstructed malicious/control certificates. Frozen toy runs verify
 84 certificates: all 42 v5 wire controls remain exact, and 42 v8 proofs match
 archived statements, keys, FHE parameters and layouts. Aggregate toy bytes fall
-1.56%/2.31% versus v5. Original-size BabyBear validation passes all 21 fresh
-statements with archived fixtures matched; Goldilocks is running. This is within-proof
+1.56%/2.31% versus v5. Original-size validation now passes all 42 fresh statements
+with archived fixtures matched. Native total bytes fall 7.24%/22.57% versus v5;
+paired timing and whole-security gates remain open. This is within-proof
 sharing, not yet cross-statement comparison aggregation or whole-security/
 performance promotion. See `packed-shared-pbs.md`.
 
