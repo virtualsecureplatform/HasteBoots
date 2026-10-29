@@ -154,6 +154,18 @@ impl<Q: NTTField> Evaluator<Q> {
         }
     }
 
+    /// Export encrypted evaluation material only; contains no secret-key pack.
+    pub fn public_evaluation_key(&self) -> EvaluationKey<Q> {
+        self.ek.clone()
+    }
+
+    /// Evaluate using an opaque, previously generated public evaluation key.
+    /// Its private fields prevent assembling unchecked key/parameter mixtures.
+    /// Importing serialized or externally assembled keys is not supported here.
+    pub fn from_public_evaluation_key(key: EvaluationKey<Q>) -> Self {
+        Self { ek: key }
+    }
+
     /// Public RLWE key-switching material, including its output LWE dimension.
     pub fn rlwe_key_switching_key(&self) -> Option<&KeySwitchingRLWEKey<Q>> {
         match &self.ek.key_switching_key {
