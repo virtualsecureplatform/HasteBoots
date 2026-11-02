@@ -18,10 +18,10 @@ use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, MutexGuard};
 
-/// Explicit original-source-sharing batches; independent openings stay unchanged.
-pub mod joint;
 /// Explicit batches sharing source and query-ladder rolling proximity.
 pub mod aggregated;
+/// Explicit original-source-sharing batches; independent openings stay unchanged.
+pub mod joint;
 
 /// Invalid geometry, source, claim, private lifetime or rejected proof.
 #[derive(Debug, thiserror::Error)]

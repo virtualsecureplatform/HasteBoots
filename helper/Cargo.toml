@@ -7,8 +7,13 @@ edition = "2024"
 algebra = { path = "../algebra" }
 num-traits = { workspace = true }
 merlin = { workspace = true }
+sha3 = "0.10"
 bincode = { workspace = true }
 serde = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
 itertools = { workspace = true }
+
+[features]
+default = []
+transcript-audit = []

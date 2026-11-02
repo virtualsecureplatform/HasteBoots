@@ -280,9 +280,25 @@ fn reduced_shape<F: PrimeField>(shape: &PackedShape<F>) -> PackedShape<F> {
 }
 
 fn sample_points<F: PrimeField>(trans: &mut Transcript<F>, shape: &PackedShape<F>) -> Vec<Vec<F>> {
-    (0..shape.width)
-        .map(|_| trans.get_vec_challenge(b"packed zero independent equality", shape.num_vars - 1))
-        .collect()
+    if trans.uses_atomic_zerocheck() {
+        let variables = shape.num_vars - 1;
+        let count = shape
+            .width
+            .checked_mul(variables)
+            .expect("trusted equality geometry");
+        let values = trans.get_vec_challenge(b"packed zero atomic equality v4", count);
+        if variables == 0 {
+            vec![vec![]; shape.width]
+        } else {
+            values.chunks_exact(variables).map(<[F]>::to_vec).collect()
+        }
+    } else {
+        (0..shape.width)
+            .map(|_| {
+                trans.get_vec_challenge(b"packed zero independent equality", shape.num_vars - 1)
+            })
+            .collect()
+    }
 }
 
 fn equality_table<F: PrimeField>(point: &[F]) -> Vec<F> {
@@ -364,6 +380,41 @@ fn check_first<F: PrimeField>(
     Ok(())
 }
 
+// Keep both first-round reductions on the same versioned coin schedule.
+fn first_challenges<F: PrimeField>(
+    trans: &mut Transcript<F>,
+    width: usize,
+    batch: bool,
+) -> (Vec<F>, Vec<F>) {
+    let (mix_label, row_label, atomic_label): (&[u8], &[u8], &[u8]) = if batch {
+        (
+            b"packed batch zero mixing matrix",
+            b"packed batch zero first challenge",
+            b"packed batch zero atomic first coins v4",
+        )
+    } else {
+        (
+            b"packed zero mixing matrix",
+            b"packed zero first challenge",
+            b"packed zero atomic first coins v4",
+        )
+    };
+    if trans.uses_atomic_zerocheck() {
+        let matrix_len = width.checked_mul(width).expect("trusted mixing geometry");
+        let count = matrix_len
+            .checked_add(width)
+            .expect("trusted first-round geometry");
+        let mut values = trans.get_vec_challenge(atomic_label, count);
+        let rows = values.split_off(matrix_len);
+        (values, rows)
+    } else {
+        (
+            trans.get_vec_challenge(mix_label, width * width),
+            trans.get_vec_challenge(row_label, width),
+        )
+    }
+}
+
 fn reduce<F: PrimeField + Serialize>(
     trans: &mut Transcript<F>,
     shape: &PackedShape<F>,
@@ -371,8 +422,7 @@ fn reduce<F: PrimeField + Serialize>(
 ) -> Result<(MatrixPair<F>, Vec<F>, Vec<F>), Error> {
     let k = shape.width;
     trans.append_message(b"packed zero first message", &first);
-    let mixing = trans.get_vec_challenge(b"packed zero mixing matrix", k * k);
-    let r = trans.get_vec_challenge(b"packed zero first challenge", k);
+    let (mixing, r) = first_challenges(trans, k, false);
     let pair = packed::challenge_pair(&r).map_err(shape_error)?;
     let claim = (0..k)
         .map(|a| {
@@ -426,5 +476,89 @@ mod borrowed_tests {
     #[test]
     fn goldilocks_borrowed_wire() {
         equivalent::<algebra::Goldilocks>();
+    }
+}
+
+#[cfg(test)]
+mod atomic_zerocheck_tests {
+    use super::*;
+    fn transcript<F: PrimeField>(version: u32) -> Transcript<F> {
+        match version {
+            1 => Transcript::new_classical(&[82; 64]),
+            2 => Transcript::new_classical_atomic_ntt(&[82; 64]),
+            3 => Transcript::new_classical_atomic_phases(&[82; 64]),
+            _ => Transcript::new_classical_atomic_zerocheck(&[82; 64]),
+        }
+    }
+    fn tail<F: PrimeField>(t: &mut Transcript<F>) -> [u8; 64] {
+        let mut bytes = [0; 64];
+        t.get_challenge_bytes(b"after schedule", &mut bytes);
+        bytes
+    }
+    fn reference<F: PrimeField>() {
+        for version in 1..=4 {
+            for variables in [1, 3] {
+                let shape = PackedShape {
+                    num_vars: variables,
+                    width: 2,
+                    num_factors: 1,
+                    terms: vec![(F::one(), vec![0])],
+                };
+                let mut actual = transcript::<F>(version);
+                let mut expected = transcript::<F>(version);
+                let points = sample_points(&mut actual, &shape);
+                let flat: Vec<F> = if version == 4 {
+                    expected
+                        .get_vec_challenge(b"packed zero atomic equality v4", 2 * (variables - 1))
+                } else {
+                    (0..2)
+                        .flat_map(|_| {
+                            expected.get_vec_challenge(
+                                b"packed zero independent equality",
+                                variables - 1,
+                            )
+                        })
+                        .collect()
+                };
+                assert_eq!(points.len(), 2);
+                assert!(points.iter().all(|p| p.len() == variables - 1));
+                assert_eq!(points.into_iter().flatten().collect::<Vec<_>>(), flat);
+                assert_eq!(tail(&mut actual), tail(&mut expected));
+            }
+            for batch in [false, true] {
+                let mut actual = transcript::<F>(version);
+                let mut expected = transcript::<F>(version);
+                let (mixing, rows) = first_challenges(&mut actual, 2, batch);
+                let (a, b, c): (&'static [u8], &'static [u8], &'static [u8]) = if batch {
+                    (
+                        b"packed batch zero mixing matrix",
+                        b"packed batch zero first challenge",
+                        b"packed batch zero atomic first coins v4",
+                    )
+                } else {
+                    (
+                        b"packed zero mixing matrix",
+                        b"packed zero first challenge",
+                        b"packed zero atomic first coins v4",
+                    )
+                };
+                let flat = if version == 4 {
+                    expected.get_vec_challenge(c, 6)
+                } else {
+                    [
+                        expected.get_vec_challenge(a, 4),
+                        expected.get_vec_challenge(b, 2),
+                    ]
+                    .concat()
+                };
+                assert_eq!([mixing, rows].concat(), flat);
+                assert_eq!(tail(&mut actual), tail(&mut expected));
+            }
+        }
+    }
+    #[test]
+    fn atomic_zerocheck_coins_match_reference_and_preserve_v1_v2_v3() {
+        reference::<algebra::BabyBear>();
+        reference::<algebra::Goldilocks>();
     }
 }

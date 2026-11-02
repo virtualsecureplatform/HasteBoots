@@ -8,6 +8,7 @@ edition = "2024"
 [dependencies]
 algebra = { path = "../algebra" }
 helper = { path = "../helper" }
+sumcheck = { path = "../sumcheck" }
 
 thiserror = { workspace = true }
 num-traits = { workspace = true }
@@ -26,6 +27,10 @@ sha2 = { version = "0.10", features = ["asm"] }
 
 [target.'cfg(all(target_os = "windows", target_env = "msvc"))'.dependencies]
 sha2 = { version = "0.10" }
+
+[features]
+hash-audit = []
+transcript-audit = ["helper/transcript-audit"]
 
 [dev-dependencies]
 criterion = { workspace = true }

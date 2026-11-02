@@ -396,8 +396,8 @@ do not meet that promotion gate by themselves.
 
 ## Reference revisions
 
-The local files are the specification used here: `2025-261(1).pdf` and `(2).pdf`
-are byte-identical HasteBoots copies; `2025-719.pdf` contains packed sumcheck and
+The local files are the specification used here: `2025-261(1).pdf`
+is the HasteBoots paper (no `(2).pdf` is present in the current refs directory); `2025-719.pdf` contains packed sumcheck and
 MW-MLE; `2025-1354.pdf` contains PipFRI; `2026-347.pdf` contains relaxed modular
 PCS and integer convolution checks. The local packed-paper revision reports
 2.2 seconds at 100-bit security with about 133 MB proofs and different FHE

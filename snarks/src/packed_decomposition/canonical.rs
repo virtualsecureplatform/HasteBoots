@@ -48,7 +48,7 @@ where
         || width < EF::D
         || EF::D == 0
         || config.logical_len() > capacity
-        || helper.width() != width
+        || (helper.width() != width && helper.width() != EF::D)
         || helper.num_vars() != scalar_vars
         || borrow.width() != width
         || borrow.num_vars() != pp.num_vars()
@@ -141,6 +141,35 @@ where
     P: CanonicalPcs<F, H>,
     R: Rng + CryptoRng,
 {
+    prove_with_statistics::<F, EF, H, P, R>(
+        trans,
+        config,
+        source,
+        borrow,
+        helper,
+        digits,
+        &mut crate::packed_extension_lookup::ProverStatistics::default(),
+        rng,
+    )
+}
+/// Prove with lookup phase counters; counters never enter the transcript.
+pub fn prove_with_statistics<F, EF, H, P, R>(
+    trans: &mut Transcript<F>,
+    config: &Config,
+    source: &CanonicalProverOracle<'_, F, H, P>,
+    borrow: &P,
+    helper: &P,
+    digits: &[&CanonicalProverOracle<'_, F, H, P>],
+    statistics: &mut crate::packed_extension_lookup::ProverStatistics,
+    rng: &mut R,
+) -> Result<Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>, Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    R: Rng + CryptoRng,
+{
     let public: Vec<_> = digits.iter().map(|d| d.verifier()).collect();
     bind::<F, EF, H, P>(trans, config, &source.verifier(), borrow, helper, &public)?;
     let columns = borrow_tables::<F, H, P>(config, source, digits)?;
@@ -178,8 +207,15 @@ where
                 .iter()
                 .map(|&slot| registry[slot])
                 .collect();
-            lookup::prove::<F, EF, H, P, R>(trans, &request.config, helper, &sources, rng)
-                .map_err(convert)
+            lookup::prove_with_statistics::<F, EF, H, P, R>(
+                trans,
+                &request.config,
+                helper,
+                &sources,
+                statistics,
+                rng,
+            )
+            .map_err(convert)
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Proof {

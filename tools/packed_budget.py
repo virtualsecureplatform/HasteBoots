@@ -13,12 +13,132 @@ from pathlib import Path
 BABYBEAR = 2**31 - 2**27 + 1
 
 
-def bounds(p, width, degree, variables, factors, message_len, encoded_len, queries):
-    """Return exact rational union-bound contributions for one ZeroCheck relation."""
+def fixed_table_equality_bound(prime, width, variables):
+    """Ideal-coin error for equality of two fixed packed base-field tables.
+
+    Uses challenge_pair's k independent evaluations of a degree <=2k-1
+    polynomial per fold. Conditional on a nonzero difference surviving the
+    preceding folds, a fixed nonzero block vanishes with probability at most
+    ((2k-1)/p)^k. Union over the possible first vanishing fold. PCS binding,
+    word availability and Fiat-Shamir compilation are separate obligations.
+    The caller must establish that prime is the field characteristic.
+    """
+    if any(type(x) is not int for x in (prime, width, variables)) or not (
+            prime >= 3 and width >= 1 and variables >= 0 and 2*width <= prime):
+        raise ValueError("invalid packed equality geometry")
+    return min(Fraction(1), variables * Fraction(2*width-1, prime)**width)
+
+
+def canonical_ntt_algebraic_bounds(prime, width, variables, polynomial_size, links=1):
+    """Non-PCS ideal-interactive terms for packed_ntt::verify_canonical.
+
+    Source tables are fixed before the k independent tensor row points;
+    the 2k claimed folded polynomials are fixed before coefficient compression.
+    Hash availability, PCS errors and adaptive Fiat-Shamir are not included.
+    """
+    fixed_table_equality_bound(prime, width, variables)
+    if (type(polynomial_size) is not int or type(links) is not int or links < 1
+            or width & (width-1) or polynomial_size < width
+            or polynomial_size & (polynomial_size-1)):
+        raise ValueError("invalid canonical NTT geometry")
+    coefficient = (polynomial_size // width).bit_length()-1
+    row = variables-coefficient
+    if row < 0:
+        raise ValueError("NTT polynomial exceeds the source table")
+    return {
+        "row_identity": links * min(Fraction(1), Fraction(row, prime)**width),
+        "coefficient_compression": links * 2*width
+            * fixed_table_equality_bound(prime, width, coefficient),
+    }
+
+
+def lookup_first_retry_bound(prime, degree, table_rows, pairs):
+    """Analysis-only stop at the first rejected reciprocal challenge.
+
+    Each compressed public table is fixed before its fresh uniform draw.
+    Zero and the negatives of at most table_rows values are excluded. On
+    paths without a rejection, each pair uses exactly two scalar phases
+    (compression and reciprocal). This does not bound consumed sampler bytes
+    or change the production retry loop. Callers must charge this event over
+    all adversarial queries and verifier submissions, including false inputs.
+    """
+    if any(type(x) is not int for x in (prime, degree, table_rows, pairs)) or not (
+            prime >= 3 and degree >= 1 and table_rows >= 1 and pairs >= 0):
+        raise ValueError('invalid lookup retry geometry')
+    q = prime**degree
+    if table_rows + 1 >= q:
+        raise ValueError('reciprocal domain must be nonempty')
+    return dict(per_fresh_reciprocal=Fraction(table_rows+1, q),
+                first_retry_union=min(Fraction(1), Fraction(pairs*(table_rows+1), q)),
+                scalar_phases_without_retry=2*pairs)
+
+
+def extension_lookup_algebraic_bounds(p, degree, variables, logical, table,
+                                      columns, count, repetitions):
+    """Conditional full-extension tuple lookup terms, excluding all PCS errors.
+
+    Fixed sources and multiplicities precede tuple/reciprocal challenges;
+    fixed helpers precede independent equality points. The extension must be
+    a field of size p**degree. Multiplicities cannot wrap the characteristic.
+    Shared sumcheck points leave all equations separate; union needs no
+    independence between equations or requests.
+    """
+    dimensions=(p,degree,variables,logical,table,columns,count,repetitions)
+    if any(type(x) is not int or x < 1 for x in dimensions) or not (
+            p >= 3 and logical <= 1 << variables and logical+table-1 < p):
+        raise ValueError('invalid extension lookup dimensions or characteristic')
+    q=p**degree
+    if table+1 >= q:
+        raise ValueError('empty reciprocal challenge domain')
+    pair=Fraction(table*(columns-1),q)+Fraction(logical+table-1,q-table-1)
+    identity_degree=3 if logical == 1 << variables else 4
+    return {
+        'rational_identity': count*pair**repetitions,
+        'sumcheck': count*repetitions*Fraction(variables,q),
+        'identity_equality_reduction': count*repetitions*Fraction(variables,q),
+        'identity_sumcheck': count*repetitions*Fraction(identity_degree*variables,q),
+    }
+
+
+def zerocheck_algebraic_bound(p, width, degree, variables):
+    """Theorem 3 round union, independent of the commitment's row code.
+
+    Conditional on the paper's packed ZeroCheck reduction and authenticated
+    terminal factors; this does not include PCS or Fiat-Shamir errors.
+    A union bound may exceed one, as in the legacy component calculator.
+    """
+    if any(type(x) is not int for x in (p, width, degree, variables)) or not (
+            p >= 3 and width >= 1 and degree >= 1 and variables >= 1):
+        raise ValueError("invalid packed ZeroCheck geometry")
     nodes = 2 * width - 1
+    if nodes*(degree+1)+1 >= p:
+        raise ValueError("field too small for packed ZeroCheck")
     zero = Fraction(max(variables, degree * nodes + 1, nodes * (degree + 1)), p) ** width
     # Theorem 3 is round-by-round; include every interaction conservatively.
-    zero *= variables + 2
+    return (variables + 2) * zero
+
+
+def atomic_zerocheck_phase_bounds(p, width, degree, variables, *, schedule_version):
+    """Conditional fixed-table bad-transition terms for trusted schedules four/five.
+
+    Requires one complete equality-point block, then one complete mixing/row
+    block. Versions 1--3 do not have those phases. This supplies neither the
+    source/Fiat-Shamir coupling nor a whole-protocol work or knowledge bound.
+    """
+    if type(schedule_version) is not int or schedule_version not in (4, 5):
+        raise ValueError('atomic packed ZeroCheck phase bounds require schedule four or five')
+    zerocheck_algebraic_bound(p, width, degree, variables)  # Shared geometry checks.
+    nodes = 2*width-1
+    return {
+        'initial_equality': min(Fraction(1), Fraction(variables-1, p)**width),
+        'first_mixed_challenge': Fraction(nodes*degree+1, p)**width,
+        'remaining_round': Fraction(nodes*(degree+1), p)**width if variables > 1 else Fraction(),
+    }
+
+
+def bounds(p, width, degree, variables, factors, message_len, encoded_len, queries):
+    """Return exact rational union-bound contributions for one ZeroCheck relation."""
+    zero = zerocheck_algebraic_bound(p, width, degree, variables)
     distance = Fraction(encoded_len - message_len + 1, encoded_len)
     # Brakedown's conservative proximity gap, not RS unique-decoding radius.
     proximity = 2 * factors * (1 - distance / 3) ** queries

@@ -7,6 +7,9 @@ use algebra::{AbstractExtensionField, Field};
 use helper::{FiatShamirTranscript, Transcript};
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+mod radius_tests;
+
 /// Invalid trusted parameters, oracle state, or rejected certificate.
 #[derive(Debug, thiserror::Error)]
 #[error("rolling FRI: {0}")]
@@ -286,6 +289,42 @@ where
     F: Field + Serialize,
     H: Hash + Send + Sync,
 {
+    prove_virtual_all_mapped_inner::<F, H, H::Output>(
+        trans,
+        pp,
+        identifiers,
+        values,
+        strict,
+        &mut |h| Ok(h),
+    )
+}
+/// Emit mapped proof hashes directly while all transcript bindings retain the
+/// original hashes. The callback sees roots before paths in wire traversal order.
+pub(crate) fn prove_virtual_all_mapped<F, H, O>(
+    trans: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    identifiers: &[H::Output],
+    values: Vec<Vec<F>>,
+    encode: &mut impl FnMut(H::Output) -> Result<O, Error>,
+) -> Result<(Proof<F, O>, Trace<F>), Error>
+where
+    F: Field + Serialize,
+    H: Hash + Send + Sync,
+{
+    prove_virtual_all_mapped_inner::<F, H, O>(trans, pp, identifiers, values, true, encode)
+}
+fn prove_virtual_all_mapped_inner<F, H, O>(
+    trans: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    identifiers: &[H::Output],
+    values: Vec<Vec<F>>,
+    strict: bool,
+    encode: &mut impl FnMut(H::Output) -> Result<O, Error>,
+) -> Result<(Proof<F, O>, Trace<F>), Error>
+where
+    F: Field + Serialize,
+    H: Hash + Send + Sync,
+{
     if identifiers.len() != pp.rounds()
         || values.len() != pp.rounds()
         || values.iter().enumerate().any(|(i, v)| v.len() != pp.len(i))
@@ -309,7 +348,7 @@ where
         })
         .collect();
     let originals: Vec<_> = states.iter().collect();
-    prove_mode(trans, pp, &originals, strict, Virtual::All)
+    prove_mode_mapped(trans, pp, &originals, strict, Virtual::All, encode)
 }
 /// Authenticate every projected original pair at (layer, initial-domain index).
 /// Empty virtual paths are mandatory; callbacks must check the enclosing roots.
@@ -338,6 +377,20 @@ fn prove_mode<F, H>(
     strict: bool,
     virtual_mode: Virtual,
 ) -> Result<(Proof<F, H::Output>, Trace<F>), Error>
+where
+    F: Field + Serialize,
+    H: Hash + Send + Sync,
+{
+    prove_mode_mapped::<F, H, H::Output>(trans, pp, originals, strict, virtual_mode, &mut |h| Ok(h))
+}
+fn prove_mode_mapped<F, H, O>(
+    trans: &mut Transcript<F>,
+    pp: &Parameters<F>,
+    originals: &[&State<F, H>],
+    strict: bool,
+    virtual_mode: Virtual,
+    encode: &mut impl FnMut(H::Output) -> Result<O, Error>,
+) -> Result<(Proof<F, O>, Trace<F>), Error>
 where
     F: Field + Serialize,
     H: Hash + Send + Sync,
@@ -394,37 +447,58 @@ where
         }
     }
     let indices = indices(trans, pp);
-    let queries = indices
+    let mapped_roots = derived
         .iter()
-        .copied()
-        .map(|index| Query {
-            originals: originals
-                .iter()
-                .enumerate()
-                .map(|(i, s)| {
-                    if virtual_mode.contains(i) {
-                        PairOpening {
-                            values: [
-                                s.values[(index >> i) & !1],
-                                s.values[((index >> i) & !1) + 1],
-                            ],
-                            path: vec![],
-                        }
-                    } else {
-                        opening(s, (index >> i) / 2)
-                    }
-                })
-                .collect(),
-            derived: derived
-                .iter()
-                .enumerate()
-                .map(|(i, s)| opening(s, (index >> (i + 1)) / 2))
-                .collect(),
+        .map(|s| {
+            Ok(Commitment {
+                root: encode(s.tree.root)?,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, Error>>()?;
+    let mut queries = Vec::with_capacity(indices.len());
+    for &index in &indices {
+        let mut original_pairs = Vec::with_capacity(originals.len());
+        for (i, s) in originals.iter().enumerate() {
+            let pair = if virtual_mode.contains(i) {
+                PairOpening {
+                    values: [
+                        s.values[(index >> i) & !1],
+                        s.values[((index >> i) & !1) + 1],
+                    ],
+                    path: vec![],
+                }
+            } else {
+                opening(s, (index >> i) / 2)
+            };
+            original_pairs.push(PairOpening {
+                values: pair.values,
+                path: pair
+                    .path
+                    .into_iter()
+                    .map(&mut *encode)
+                    .collect::<Result<Vec<_>, Error>>()?,
+            });
+        }
+        let mut derived_pairs = Vec::with_capacity(derived.len());
+        for (i, s) in derived.iter().enumerate() {
+            let pair = opening(s, (index >> (i + 1)) / 2);
+            derived_pairs.push(PairOpening {
+                values: pair.values,
+                path: pair
+                    .path
+                    .into_iter()
+                    .map(&mut *encode)
+                    .collect::<Result<Vec<_>, Error>>()?,
+            });
+        }
+        queries.push(Query {
+            originals: original_pairs,
+            derived: derived_pairs,
+        });
+    }
     Ok((
         Proof {
-            derived: derived.iter().map(|s| s.commitment()).collect(),
+            derived: mapped_roots,
             terminal,
             queries,
         },
@@ -498,7 +572,7 @@ where
     {
         return Err(Error("noncanonical virtual-all field encoding"));
     }
-    bind_mode::<F, H>(trans, pp, originals, virtual_mode)?;
+    let context = bind_mode::<F, H>(trans, pp, originals, virtual_mode)?;
     let rounds = pp.rounds();
     if proof.derived.len() != rounds - 1
         || proof.queries.len() != pp.queries
@@ -527,8 +601,9 @@ where
                 }
                 authenticate(i, index, &q.originals[i])?;
             } else {
-                check_pair::<F, H>(
+                check_pair_with_context::<F, H>(
                     pp,
+                    &context,
                     Role::Original,
                     i,
                     &originals[i],
@@ -537,8 +612,9 @@ where
                 )?;
             }
             if i > 0 {
-                check_pair::<F, H>(
+                check_pair_with_context::<F, H>(
                     pp,
+                    &context,
                     Role::Derived,
                     i,
                     &proof.derived[i - 1],
@@ -575,35 +651,35 @@ fn bind<F: Field + Serialize, H: Hash>(
     pp: &Parameters<F>,
     roots: &[Commitment<H::Output>],
 ) -> Result<(), Error> {
-    bind_mode::<F, H>(t, pp, roots, Virtual::None)
+    bind_mode::<F, H>(t, pp, roots, Virtual::None).map(|_| ())
 }
 fn bind_mode<F: Field + Serialize, H: Hash>(
     t: &mut Transcript<F>,
     pp: &Parameters<F>,
     roots: &[Commitment<H::Output>],
     virtual_mode: Virtual,
-) -> Result<(), Error> {
+) -> Result<H::Output, Error> {
     if roots.len() != pp.rounds() {
         return Err(Error("expected original root count"));
     }
+    let context = pp.context::<H>();
     t.append_message(
         match virtual_mode {
             Virtual::None => b"HasteBoots rolling batch FRI v1".as_slice(),
             Virtual::First => b"HasteBoots rolling batch FRI virtual initial v1".as_slice(),
             Virtual::All => b"HasteBoots rolling batch FRI virtual all v2".as_slice(),
         },
-        &(pp.context::<H>(), roots),
+        &(context, roots),
     );
-    Ok(())
+    Ok(context)
 }
 fn indices<F: Field + Serialize>(t: &mut Transcript<F>, pp: &Parameters<F>) -> Vec<usize> {
-    (0..pp.queries)
-        .map(|_| {
-            let mut bytes = [0u8; 8];
-            t.get_challenge_bytes(b"rolling FRI unbiased domain index", &mut bytes);
-            (u64::from_le_bytes(bytes) & (pp.encoded_len() as u64 - 1)) as usize
-        })
-        .collect()
+    t.get_index_challenges(
+        b"rolling FRI unbiased domain index",
+        pp.encoded_len(),
+        pp.queries,
+    )
+    .expect("trusted rolling sampling geometry")
 }
 pub(crate) fn hash<H: Hash, T: Serialize>(value: &T) -> H::Output {
     let mut h = H::new();
@@ -613,8 +689,8 @@ pub(crate) fn hash<H: Hash, T: Serialize>(value: &T) -> H::Output {
     );
     h.output_reset()
 }
-fn leaf<F: Field + Serialize, H: Hash>(
-    pp: &Parameters<F>,
+fn leaf_with_context<F: Field + Serialize, H: Hash>(
+    context: &H::Output,
     role: Role,
     layer: usize,
     index: usize,
@@ -622,7 +698,7 @@ fn leaf<F: Field + Serialize, H: Hash>(
 ) -> H::Output {
     hash::<H, _>(&(
         b"rolling FRI pair leaf v1",
-        pp.context::<H>(),
+        context,
         role,
         layer,
         index,
@@ -635,17 +711,18 @@ fn state<F: Field + Serialize, H: Hash + Send + Sync>(
     layer: usize,
     values: Vec<F>,
 ) -> State<F, H> {
+    let context = pp.context::<H>();
     let hashes = values
         .chunks_exact(2)
         .enumerate()
-        .map(|(j, p)| leaf::<F, H>(pp, role, layer, j, &[p[0], p[1]]))
+        .map(|(j, p)| leaf_with_context::<F, H>(&context, role, layer, j, &[p[0], p[1]]))
         .collect::<Vec<_>>();
     let mut tree = MerkleTree::new();
     tree.generate(&hashes);
     State {
         values,
         tree,
-        context: pp.context::<H>(),
+        context,
         role,
         layer,
     }
@@ -667,11 +744,22 @@ pub(crate) fn check_pair<F: Field + Serialize, H: Hash + Send + Sync>(
     index: usize,
     p: &PairOpening<F, H::Output>,
 ) -> Result<(), Error> {
+    check_pair_with_context::<F, H>(pp, &pp.context::<H>(), role, layer, root, index, p)
+}
+fn check_pair_with_context<F: Field + Serialize, H: Hash + Send + Sync>(
+    pp: &Parameters<F>,
+    context: &H::Output,
+    role: Role,
+    layer: usize,
+    root: &Commitment<H::Output>,
+    index: usize,
+    p: &PairOpening<F, H::Output>,
+) -> Result<(), Error> {
     let depth = (pp.len(layer) / 2).ilog2() as usize;
     if p.path.len() != depth + 1 || index >= pp.len(layer) / 2 {
         return Err(Error("pair path dimensions"));
     }
-    if p.path[0] != leaf::<F, H>(pp, role, layer, index, &p.values)
+    if p.path[0] != leaf_with_context::<F, H>(context, role, layer, index, &p.values)
         || !MerkleTree::<H>::check(&root.root, index, &p.path)
     {
         return Err(Error("pair authentication"));
@@ -784,6 +872,82 @@ mod tests {
     use algebra::{NTTField, transformation::AbstractNTT};
     use serde::de::DeserializeOwned;
     use sha2::Sha256;
+
+    #[test]
+    fn cached_leaf_context_preserves_preimages_and_hash_count() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static OUTPUTS: AtomicUsize = AtomicUsize::new(0);
+        #[derive(Clone, Debug, Default)]
+        struct Counted(sha2::Sha512);
+        impl Hash for Counted {
+            type Output = crate::utils::hash::Digest512;
+            fn update_hash_value(&mut self, input: &[u8]) {
+                Hash::update_hash_value(&mut self.0, input);
+            }
+            fn output_reset(&mut self) -> Self::Output {
+                OUTPUTS.fetch_add(1, Ordering::Relaxed);
+                Hash::output_reset(&mut self.0)
+            }
+        }
+        fn check<Base: NTTField, E: AbstractExtensionField<Base> + Serialize>() {
+            let native = Base::generate_ntt_table(5).unwrap().root();
+            for blowup in [2, 4, 8] {
+                let root = E::from_base(power(native, 32 / (4 * blowup)));
+                let pp = Parameters::new(4, blowup, 8, root).unwrap();
+                for layer in 0..pp.rounds() {
+                    for role in [Role::Original, Role::Derived] {
+                        let values: Vec<E> = (0..pp.len(layer))
+                            .map(|i| E::from_base_fn(|j| Base::from(17 * i + 29 * j + 1)))
+                            .collect();
+                        OUTPUTS.store(0, Ordering::Relaxed);
+                        let cached = state::<E, Counted>(&pp, role, layer, values.clone());
+                        let leaves = values.len() / 2;
+                        assert_eq!(OUTPUTS.load(Ordering::Relaxed), 2 * leaves);
+                        let hashes: Vec<_> = values
+                            .chunks_exact(2)
+                            .enumerate()
+                            .map(|(index, p)| {
+                                // Original owned-context leaf tuple, independently
+                                // of leaf_with_context and the cache path.
+                                hash::<sha2::Sha512, _>(&(
+                                    b"rolling FRI pair leaf v1",
+                                    pp.context::<sha2::Sha512>(),
+                                    role,
+                                    layer,
+                                    index,
+                                    &[p[0], p[1]],
+                                ))
+                            })
+                            .collect();
+                        let mut reference = MerkleTree::<sha2::Sha512>::new();
+                        reference.generate(&hashes);
+                        assert_eq!(cached.tree.root, reference.root);
+                        let context = pp.context::<sha2::Sha512>();
+                        OUTPUTS.store(0, Ordering::Relaxed);
+                        for index in 0..leaves {
+                            assert_eq!(cached.tree.query(index), reference.query(index));
+                            check_pair_with_context::<E, Counted>(
+                                &pp,
+                                &context,
+                                role,
+                                layer,
+                                &cached.commitment(),
+                                index,
+                                &opening(&cached, index),
+                            )
+                            .unwrap();
+                        }
+                        assert_eq!(
+                            OUTPUTS.load(Ordering::Relaxed),
+                            leaves * cached.tree.query(0).len()
+                        );
+                    }
+                }
+            }
+        }
+        check::<algebra::BabyBear, algebra::BabyBearExtension6>();
+        check::<algebra::Goldilocks, algebra::GoldilocksExtension3>();
+    }
 
     #[test]
     fn virtual_all_normalizes_and_rejects_lazy_field_bytes() {

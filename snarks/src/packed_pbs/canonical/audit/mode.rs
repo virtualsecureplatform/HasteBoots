@@ -28,7 +28,14 @@ where
         helper: &P,
         digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
         proof: &Self::Decomposition,
-    ) -> Result<([bool; 3], bool), Error>;
+    ) -> Result<
+        (
+            ([bool; 3], bool),
+            Vec<Vec<algebra::matrix_weighted::MatrixPair<F>>>,
+            Option<crate::packed_extension_lookup::canonical::shared::audit::SourceClaims<F>>,
+        ),
+        Error,
+    >;
     fn audit_key_switch<R: Rng + CryptoRng>(
         trans: &mut Transcript<F>,
         pp: &final_stage::Parameters<'_, P>,
@@ -51,7 +58,7 @@ where
         a: &[F],
         b: F,
         proof: &Self::KeySwitch,
-    ) -> Result<(bool, bool, [bool; 3], bool), Error>;
+    ) -> Result<((bool, bool, [bool; 3], bool), key_audit::FinalQueries<F>), Error>;
 }
 macro_rules! adapter {
     ($name:ident,$radix:ident,$key_prove:ident,$key_verify:ident) => {
@@ -89,9 +96,20 @@ macro_rules! adapter {
                 helper: &P,
                 digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
                 proof: &Self::Decomposition,
-            ) -> Result<([bool; 3], bool), Error> {
-                $radix::verify::<F, EF, H, P>(trans, cfg, source, borrow, helper, digits, proof)
-                    .map_err(convert)
+            ) -> Result<
+                (
+                    ([bool; 3], bool),
+                    Vec<Vec<algebra::matrix_weighted::MatrixPair<F>>>,
+                    Option<
+                        crate::packed_extension_lookup::canonical::shared::audit::SourceClaims<F>,
+                    >,
+                ),
+                Error,
+            > {
+                $radix::verify_queries::<F, EF, H, P>(
+                    trans, cfg, source, borrow, helper, digits, proof,
+                )
+                .map_err(convert)
             }
             fn audit_key_switch<R: Rng + CryptoRng>(
                 trans: &mut Transcript<F>,
@@ -131,12 +149,18 @@ macro_rules! adapter {
                 a: &[F],
                 b: F,
                 proof: &Self::KeySwitch,
-            ) -> Result<(bool, bool, [bool; 3], bool), Error> {
+            ) -> Result<((bool, bool, [bool; 3], bool), key_audit::FinalQueries<F>), Error> {
                 key_audit::$key_verify::<F, EF, H, P>(trans, pp, key, acc, a, b, proof)
                     .map_err(convert)
             }
         }
     };
 }
-adapter!(PerLimb, per_limb, prove_foreign, verify);
-adapter!(Shared, shared_radix, prove_shared, verify_shared);
+adapter!(PerLimb, per_limb, prove_foreign, verify_queries);
+adapter!(Shared, shared_radix, prove_shared, verify_shared_queries);
+adapter!(
+    ClassicalShared,
+    shared_radix,
+    prove_shared,
+    verify_shared_queries
+);

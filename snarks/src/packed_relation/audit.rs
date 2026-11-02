@@ -52,6 +52,19 @@ where
     H: Hash + Send + Sync,
     P: CanonicalPcs<F, H>,
 {
+    verify_subclaim::<F, H, P>(trans, shape, sources, proof).map(|result| result.0)
+}
+pub(crate) fn verify_subclaim<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &PackedShape<F>,
+    sources: &[crate::packed_oracle::CanonicalVerifierOracle<'_, H::Output, P>],
+    proof: &CanonicalRelationProof<F, P::SingleProof>,
+) -> Result<(bool, sumcheck::packed_zero::ZeroSubclaim<F>), Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
     if sources.is_empty() {
         return Err(Error(
             "incorrect factor commitment/opening dimensions".into(),
@@ -82,5 +95,5 @@ where
             .verify(trans, source.commitment, &subclaim.query, value, opening)
             .map_err(convert)?;
     }
-    Ok(valid)
+    Ok((valid, subclaim))
 }

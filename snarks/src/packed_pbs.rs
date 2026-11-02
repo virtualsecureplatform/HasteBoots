@@ -233,6 +233,9 @@ pub type SharedProof<F,EF,O>=Proof<F,O,decomp::shared::Proof<F,EF,O>,relation::a
 /// Prover phase costs; public setup, native evaluation and serialization are external.
 #[derive(Default, Debug)]
 pub struct ProverStatistics {
+    /// Canonical main-decomposition lookups only; a subset of decomposition.
+    /// Final key-switch lookups are excluded. Not serialized or transcript data.
+    pub canonical_lookup: crate::packed_extension_lookup::ProverStatistics,
     pub preparation: Duration,
     pub hadamard: Duration,
     pub ntt: Duration,

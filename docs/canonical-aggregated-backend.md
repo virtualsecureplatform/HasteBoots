@@ -69,3 +69,14 @@ RAYON_NUM_THREADS=8 cargo test --release --locked -p snarks --lib packed_pbs::ca
 The complete combined log can be checked with
 `tools/check_complete_binding_audit.py --backend masked-aggregated --scope all`.
 The report checker does not independently verify cryptographic proof bytes.
+
+## Completed full-stage audit
+
+The archived combined run and coverage checker now complete successfully:
+72 certificates across both fields and versions 10/11, comprising four accepted
+controls and 68 intended rejections. The earlier pending-coverage statement
+is superseded. Rechecking `all-cases.log` with the documented checker and
+`--backend masked-aggregated --scope all` reproduces these counts. The checker
+validates emitted coverage reports; production verification runs in Rust.
+Original-size encrypted adversarial validation, whole-security certification
+and hiding remain open.

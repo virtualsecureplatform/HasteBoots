@@ -48,7 +48,14 @@ where
         helper: &P,
         digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
         proof: &Self::Proof,
-    ) -> Result<([bool; 3], bool), Error>;
+    ) -> Result<
+        (
+            ([bool; 3], bool),
+            Vec<Vec<algebra::matrix_weighted::MatrixPair<F>>>,
+            Option<crate::packed_extension_lookup::canonical::shared::audit::SourceClaims<F>>,
+        ),
+        Error,
+    >;
 }
 macro_rules! backend {
     ($name:ident,$module:ident,$domain:expr) => {
@@ -122,8 +129,17 @@ macro_rules! backend {
                 helper: &P,
                 digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
                 proof: &Self::Proof,
-            ) -> Result<([bool; 3], bool), Error> {
-                $module::audit::verify::<F, EF, H, P>(
+            ) -> Result<
+                (
+                    ([bool; 3], bool),
+                    Vec<Vec<algebra::matrix_weighted::MatrixPair<F>>>,
+                    Option<
+                        crate::packed_extension_lookup::canonical::shared::audit::SourceClaims<F>,
+                    >,
+                ),
+                Error,
+            > {
+                $module::audit::verify_queries::<F, EF, H, P>(
                     trans, cfg, source, borrow, helper, digits, proof,
                 )
                 .map_err(convert)

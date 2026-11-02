@@ -51,7 +51,7 @@ where
     P: CanonicalPcs<F, H>,
     R: Rng + CryptoRng,
 {
-    super::prove_inner::<F, EF, H, P, R, stages::Shared>(pp, setup, s, trace, rng, stats)
+    super::prove_inner::<F, EF, H, P, R, stages::Shared>(pp, setup, s, trace, rng, stats, None)
 }
 /// Verify using only trusted setup/PCS parameters and public input/output ciphertexts.
 pub fn verify<F, EF, H, P>(
@@ -66,5 +66,5 @@ where
     H: Hash + Send + Sync,
     P: CanonicalPcs<F, H>,
 {
-    super::verify_inner::<F, EF, H, P, stages::Shared>(pp, setup, s, proof)
+    super::verify_inner::<F, EF, H, P, stages::Shared>(pp, setup, s, proof, None)
 }

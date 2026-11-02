@@ -3,16 +3,18 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![deny(missing_docs)]
 
+/// Trusted, versioned parameter descriptors for experimental classical profiles.
+pub mod classical_profile;
 /// Experimental base-field commitments for packed matrix-weighted queries.
 pub mod matrix_weighted;
 /// mulilinear polynomial commitment
 pub mod multilinear;
 /// Experimental streaming structured matrix-weighted Basefold primitive.
 pub mod mw_basefold;
-/// Experimental non-hiding ordinary PipFRI reference PCS.
-pub mod pipfri;
 /// Experimental algebraic core for direct ordered-matrix PolyFRIM.
 pub mod packed_polyfrim;
+/// Experimental non-hiding ordinary PipFRI reference PCS.
+pub mod pipfri;
 /// Experimental authenticated rolling-batch FRI primitive for ordinary PipFRI.
 pub mod rolling_fri;
 /// utils, mainly used to implement linear time encodable code now

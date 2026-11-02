@@ -156,6 +156,16 @@ impl<F: NTTField> RowCode<F> for BlockReedSolomonCode<F> {
         let table =
             F::get_ntt_table(self.codeword_blocks.ilog2()).expect("validated block RS domain");
         assert_eq!(table.root(), self.domain_root, "block RS domain changed");
+        // Helper packing includes entire zero rows in unused extension lanes.
+        // Check the raw base-field representation, so lazy noncanonical zeros
+        // retain the original transform and wire spelling.
+        if input
+            .iter()
+            .all(|value| value.is_canonical() && *value == F::zero())
+        {
+            output.fill(F::zero());
+            return;
+        }
         // Reuse one base-field buffer for all coordinates. Multiplications in
         // transform_slice are exclusively base-field NTT butterflies.
         let mut coordinate = vec![F::zero(); self.codeword_blocks];

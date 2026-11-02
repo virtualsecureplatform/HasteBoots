@@ -2,6 +2,9 @@
 //! Zero evaluation keys isolate linkage; these are not encrypted native profiles.
 use super::*;
 mod mode;
+mod classical;
+mod outer_prefix;
+mod context_resources;
 use algebra::Basis;
 use mode::AuditStages;
 use rand::{SeedableRng, rngs::StdRng};
@@ -79,6 +82,29 @@ where
     EF: AbstractExtensionField<F> + Serialize,
     P: CanonicalPcs<F, Sha256>,
     D: AuditStages<F, EF, Sha256, P>,
+{
+    make_with_transcript::<F, EF, Sha256, P, D>(
+        pp, setup, attack, seed, Transcript::new_direct(),
+    )
+}
+
+fn make_with_transcript<F, EF, H, P, D>(
+    pp: &Parameters<'_, P>,
+    setup: &canonical_setup::ProverSetup<F, H, P>,
+    attack: Attack,
+    seed: u64,
+    mut trans: Transcript<F>,
+) -> (
+    StatementData<F>,
+    BackendProof<F, H::Output, P::SingleProof, P::BatchProof, D::Decomposition, D::KeySwitch>,
+    (F, [u8; 32]),
+)
+where
+    F: NTTField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    D: AuditStages<F, EF, H, P>,
 {
     let expected = setup.verifier();
     let cfg = &expected.config;
@@ -233,7 +259,7 @@ where
             .collect::<Vec<_>>()
     };
     let (co_roots, co_states) =
-        commit::<F, Sha256, P, _>(pp.coefficients, &tables(co), &mut rng).unwrap();
+        commit::<F, H, P, _>(pp.coefficients, &tables(co), &mut rng).unwrap();
     F::init_ntt_table(cfg.n.ilog2()).unwrap();
     let native = F::get_ntt_table(cfg.n.ilog2()).unwrap();
     let ev_tables: Vec<_> = co_states
@@ -247,17 +273,16 @@ where
         })
         .collect();
     let (ev_roots, ev_states) =
-        commit::<F, Sha256, P, _>(pp.evaluations, &ev_tables, &mut rng).unwrap();
+        commit::<F, H, P, _>(pp.evaluations, &ev_tables, &mut rng).unwrap();
     let (ac_roots, ac_states): (Vec<_>, Vec<_>) = tables(ac)
         .iter()
         .zip(pp.accumulators)
         .map(|(t, p)| p.commit(t, &mut rng).map_err(convert).unwrap())
         .unzip();
     let (in_roots, in_states) =
-        commit::<F, Sha256, P, _>(pp.inputs, &tables(inputs), &mut rng).unwrap();
-    let normalized = statement::<F, Sha256, P>(pp.coefficients, &s.borrowed());
-    let mut trans = Transcript::new_direct();
-    bind_inner::<F, EF, Sha256, P, D>(
+        commit::<F, H, P, _>(pp.inputs, &tables(inputs), &mut rng).unwrap();
+    let normalized = statement::<F, H, P>(pp.coefficients, &s.borrowed());
+    bind_inner::<F, EF, H, P, D>(
         &mut trans,
         pp,
         &expected,
@@ -269,15 +294,15 @@ where
         &final_acc,
     )
     .unwrap();
-    let co = oracles::<F, Sha256, P>(pp.coefficients, &co_roots, &co_states);
-    let ev = oracles::<F, Sha256, P>(pp.evaluations, &ev_roots, &ev_states);
-    let input = oracles::<F, Sha256, P>(pp.inputs, &in_roots, &in_states);
+    let co = oracles::<F, H, P>(pp.coefficients, &co_roots, &co_states);
+    let ev = oracles::<F, H, P>(pp.evaluations, &ev_roots, &ev_states);
+    let input = oracles::<F, H, P>(pp.inputs, &in_roots, &in_states);
     let ac: Vec<_> = ac_roots
         .iter()
         .zip(&ac_states)
         .zip(pp.accumulators)
         .map(
-            |((commitment, state), parameters)| CanonicalProverOracle::<F, Sha256, P> {
+            |((commitment, state), parameters)| CanonicalProverOracle::<F, H, P> {
                 parameters,
                 commitment,
                 state,
@@ -301,7 +326,7 @@ where
                 }
             })
             .collect();
-        relation::audit::prove_foreign::<F, Sha256, P>(
+        relation::audit::prove_foreign::<F, H, P>(
             &mut trans,
             &shape(vars, width, 2 * d),
             &factors,
@@ -309,7 +334,7 @@ where
         )
         .unwrap()
     } else {
-        relation::prove_canonical::<F, Sha256, P>(
+        relation::prove_canonical::<F, H, P>(
             &mut trans,
             &shape(vars, width, 2 * d),
             &factors,
@@ -317,10 +342,10 @@ where
         )
         .unwrap()
     };
-    let ntt_shape = ntt::Shape::new_canonical::<F, Sha256, P>(pp.coefficients, cfg.n).unwrap();
+    let ntt_shape = ntt::Shape::new_canonical::<F, H, P>(pp.coefficients, cfg.n).unwrap();
     let ntt = (0..2 * d + 1)
         .map(|i| {
-            ntt::prove_canonical::<F, Sha256, P>(&mut trans, &ntt_shape, &co[i], &ev[i]).unwrap()
+            ntt::prove_canonical::<F, H, P>(&mut trans, &ntt_shape, &co[i], &ev[i]).unwrap()
         })
         .collect();
     let decomposition = (0..2)
@@ -352,7 +377,7 @@ where
         &input[0],
         &input[1],
     ];
-    let (accumulator, valid) = acc::audit::prove::<F, Sha256, P>(
+    let (accumulator, valid) = acc::audit::prove::<F, H, P>(
         &mut trans,
         &acc::Shape::new(cfg.n, cfg.lwe).unwrap(),
         &requested_initial,
@@ -361,7 +386,7 @@ where
     )
     .unwrap();
     assert_eq!(valid, attack.accumulator_valid());
-    let monomial = mono::canonical::audit::prove_foreign::<F, Sha256, P, _>(
+    let monomial = mono::canonical::audit::prove_foreign::<F, H, P, _>(
         &mut trans,
         &plan,
         if attack == Attack::Rotation {
@@ -374,7 +399,7 @@ where
         &mut rng,
     )
     .unwrap();
-    let mut coefficients = final_stage::audit::zero_key_coefficients::<F, Sha256, P>(
+    let mut coefficients = final_stage::audit::zero_key_coefficients::<F, H, P>(
         &pp.final_stage,
         &expected.ks,
         &final_acc,
@@ -473,6 +498,40 @@ where
     P: CanonicalPcs<F, H>,
     D: AuditStages<F, EF, H, P>,
 {
+    reference_transcript_queries::<F, EF, H, P, D>(pp, setup, s, proof, trans)
+        .map(|result| result.0)
+}
+struct CompleteQueries<F> {
+    final_stage: final_stage::audit::FinalQueries<F>,
+    primary_product: sumcheck::packed_zero::ZeroSubclaim<F>,
+    monomial: mono::canonical::audit::Queries<F>,
+    primary_decompositions: Vec<(Vec<Vec<algebra::matrix_weighted::MatrixPair<F>>>,
+        Option<crate::packed_extension_lookup::canonical::shared::audit::SourceClaims<F>>)>,
+    accumulator: Vec<Vec<Vec<algebra::matrix_weighted::MatrixPair<F>>>>,
+    #[cfg(feature = "transcript-audit")]
+    primary_ntt: Vec<ntt::AuditSourceObligations<F>>,
+}
+fn reference_transcript_queries<F, EF, H, P, D>(
+    pp: &Parameters<'_, P>,
+    setup: &VerifierSetup<H::Output>,
+    s: &Statement<'_, F>,
+    proof: &BackendProof<
+        F,
+        H::Output,
+        P::SingleProof,
+        P::BatchProof,
+        D::Decomposition,
+        D::KeySwitch,
+    >,
+    trans: &mut Transcript<F>,
+) -> Result<(Report, CompleteQueries<F>), Error>
+where
+    F: NTTField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    D: AuditStages<F, EF, H, P>,
+{
     if proof.protocol_version != D::VERSION {
         return Err(error("unsupported canonical complete PBS protocol version"));
     }
@@ -516,7 +575,7 @@ where
             commitment: s.commitment,
         })
         .collect();
-    let key_product_valid = relation::audit::verify::<F, H, P>(
+    let (key_product_valid, primary_product) = relation::audit::verify_subclaim::<F, H, P>(
         trans,
         &shape(pp.evaluations.num_vars(), width, 2 * d),
         &factors,
@@ -525,14 +584,20 @@ where
     .map_err(convert)?;
     let ntt_shape =
         ntt::Shape::new_canonical::<F, H, P>(pp.coefficients, cfg.n).map_err(convert)?;
+    #[cfg(feature = "transcript-audit")]
+    let mut primary_ntt = Vec::new();
     for i in 0..2 * d + 1 {
+        #[cfg(feature = "transcript-audit")]
+        primary_ntt.push(ntt::audit_verified_source_obligations::<F, H, P>(trans, &ntt_shape, &co[i], &ev[i], &proof.ntt[i]).map_err(convert)?);
+        #[cfg(not(feature = "transcript-audit"))]
         ntt::verify_canonical::<F, H, P>(trans, &ntt_shape, &co[i], &ev[i], &proof.ntt[i])
             .map_err(convert)?;
     }
     let mut decomposition_valid = [[true; 3]; 2];
     let mut lookup_valid = [true; 2];
+    let mut primary_decompositions = Vec::new();
     for half in 0..2 {
-        let (linear, lookup) = D::audit_verify_decomposition(
+        let ((linear, lookup), queries, claims) = D::audit_verify_decomposition(
             trans,
             &cfg.decomposition::<F>()?,
             &input[half],
@@ -547,6 +612,7 @@ where
                 .collect::<Vec<_>>(),
             &proof.decomposition[half],
         )?;
+        primary_decompositions.push((queries, claims));
         decomposition_valid[half] = linear;
         lookup_valid[half] = lookup;
     }
@@ -574,7 +640,7 @@ where
         commitment: s.commitment,
     })
     .collect::<Vec<_>>();
-    let linkage_valid = acc::audit::verify::<F, H, P>(
+    let (linkage_valid, accumulator_queries) = acc::audit::verify_queries::<F, H, P>(
         trans,
         &acc::Shape::new(cfg.n, cfg.lwe).map_err(convert)?,
         &initial,
@@ -583,7 +649,7 @@ where
         &proof.accumulator,
     )
     .map_err(convert)?;
-    let monomial_valid = mono::canonical::audit::verify::<F, H, P>(
+    let (monomial_valid, monomial_queries) = mono::canonical::audit::verify_queries::<F, H, P>(
         trans,
         &plan,
         pp.monomial,
@@ -597,12 +663,12 @@ where
         &proof.monomial,
     )
     .map_err(convert)?;
-    let (
+    let ((
         switch_key_product_valid,
         extraction_valid,
         switch_decomposition_valid,
         switch_lookup_valid,
-    ) = D::audit_verify_key_switch(
+    ), final_queries) = D::audit_verify_key_switch(
         trans,
         &pp.final_stage,
         &setup.ks,
@@ -611,7 +677,7 @@ where
         s.output_b,
         &proof.key_switch,
     )?;
-    Ok(Report {
+    Ok((Report {
         decomposition: decomposition_valid,
         switch_decomposition: switch_decomposition_valid,
         lookups: lookup_valid,
@@ -621,7 +687,13 @@ where
         accumulator: linkage_valid,
         monomial: monomial_valid,
         extraction: extraction_valid,
-    })
+    }, CompleteQueries {
+        final_stage: final_queries, primary_product, primary_decompositions,
+        accumulator: accumulator_queries,
+        monomial: monomial_queries,
+        #[cfg(feature = "transcript-audit")]
+        primary_ntt,
+    }))
 }
 
 fn run<F, EF, P, D>(
@@ -692,7 +764,7 @@ fn run<F, EF, P, D>(
         &mut replay_bytes,
     );
     assert_eq!(transcript_bytes, replay_bytes);
-    let result = verify_inner::<F, EF, Sha256, P, D>(pp, &expected, &s.borrowed(), &proof);
+    let result = verify_inner::<F, EF, Sha256, P, D>(pp, &expected, &s.borrowed(), &proof, None);
     let production_error = if attack == Attack::Control {
         result.unwrap();
         None
@@ -1779,4 +1851,255 @@ joint_backend_cases!(
     4,
     stages::Shared,
     aggregated_masked
+);
+
+fn unmasked_backend<F, EF, P, D>(
+    width: usize,
+    attack: Attack,
+    backend: &str,
+    make: impl Fn(usize, usize) -> P,
+) where
+    F: NTTField + Serialize + DeserializeOwned,
+    EF: AbstractExtensionField<F> + Serialize + DeserializeOwned,
+    P: CanonicalPcs<F, Sha256>,
+    P::SingleProof: DeserializeOwned,
+    P::BatchProof: DeserializeOwned,
+    D: AuditStages<F, EF, Sha256, P>,
+    D::Decomposition: Serialize + DeserializeOwned,
+    D::KeySwitch: Serialize + DeserializeOwned,
+{
+    let cfg = Config::new::<F>(32, 21, 8, 5, 1, 1).unwrap();
+    let dims = cfg.variables(width).unwrap();
+    let cpp = make(dims[0], width + 2);
+    let epp = make(dims[0], width + 1);
+    let key = make(dims[0], 1);
+    let inputs = make(dims[0], 2);
+    let borrow = make(dims[0], 3);
+    let helper = make(dims[1], 2);
+    let monomial = make(dims[0], width + 1);
+    let ac = [
+        make(dims[0], width + 8),
+        make(dims[0], width + 1),
+        make(dims[0], 3),
+        make(dims[0], 2),
+    ];
+    let fco = make(dims[2], width + 2);
+    let fev = make(dims[2], width + 1);
+    let fkey = make(dims[2], 1);
+    let fin = make(dims[2], 2);
+    let fborrow = make(dims[2], 3);
+    let fhelper = make(dims[3], 2);
+    let pp = Parameters {
+        coefficients: &cpp,
+        evaluations: &epp,
+        key: &key,
+        inputs: &inputs,
+        borrows: &borrow,
+        helper: &helper,
+        accumulators: [&ac[0], &ac[1], &ac[2], &ac[3]],
+        monomial: &monomial,
+        final_stage: final_stage::Parameters {
+            coefficients: &fco,
+            evaluations: &fev,
+            key: &fkey,
+            input: &fin,
+            borrows: &fborrow,
+            helper: &fhelper,
+        },
+    };
+    let mut br = vec![NTTRGSW::<F>::zero(32, Basis::new(8)); 21];
+    if attack == Attack::KeyProduct {
+        let mut weight = F::one();
+        for limb in br[0].c_m_mut().iter_mut() {
+            limb.b_mut_slice().fill(weight);
+            weight *= F::from(256usize);
+        }
+    }
+    let mut ks = vec![NTTGadgetRLWE::<F>::zero(32, Basis::new(5))];
+    if attack == Attack::SwitchKeyProduct {
+        let mut weight = F::one();
+        for limb in br[0].c_m_mut().iter_mut() {
+            limb.a_mut_slice().fill(weight);
+            weight *= F::from(256usize);
+        }
+        let mut weight = F::one();
+        for limb in ks[0].iter_mut() {
+            limb.b_mut_slice().fill(weight);
+            weight *= F::from(32usize);
+        }
+    }
+    let setup = canonical_setup::preprocess::<F, Sha256, _, _>(
+        &canonical_setup::Parameters {
+            source: &key,
+            helper: &helper,
+            final_source: &fkey,
+            final_helper: &fhelper,
+        },
+        cfg,
+        &br,
+        &ks,
+        &mut StdRng::seed_from_u64(2100 + attack as u64),
+    )
+    .unwrap();
+    run::<F, EF, _, D>(&pp, &setup, attack, backend);
+}
+
+fn unmasked<F, EF, D>(width: usize, attack: Attack)
+where
+    F: NTTField + Serialize + DeserializeOwned,
+    EF: AbstractExtensionField<F> + Serialize + DeserializeOwned,
+    D: AuditStages<F, EF, Sha256, pcs::matrix_weighted::polyfrim::Parameters<F, EF>>,
+    D::Decomposition: Serialize + DeserializeOwned,
+    D::KeySwitch: Serialize + DeserializeOwned,
+{
+    use pcs::matrix_weighted::polyfrim::Parameters as Pp;
+    unmasked_backend::<F, EF, Pp<F, EF>, D>(width, attack, "unmasked-polyfrim", |vars, _budget| {
+        Pp::new(vars, width, 2, 8).unwrap()
+    });
+}
+
+joint_backend_cases!(
+    v10_unmasked_babybear,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    stages::PerLimb,
+    unmasked
+);
+
+joint_backend_cases!(
+    v10_unmasked_goldilocks,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    stages::PerLimb,
+    unmasked
+);
+
+joint_backend_cases!(
+    v11_unmasked_babybear,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    stages::Shared,
+    unmasked
+);
+
+joint_backend_cases!(
+    v11_unmasked_goldilocks,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    stages::Shared,
+    unmasked
+);
+
+fn unmasked_compact<F, EF, D>(width: usize, attack: Attack)
+where
+    F: NTTField + Serialize + DeserializeOwned,
+    EF: AbstractExtensionField<F> + Serialize + DeserializeOwned,
+    D: AuditStages<F, EF, Sha256, pcs::matrix_weighted::polyfrim::compact::Parameters<F, EF>>,
+    D::Decomposition: Serialize + DeserializeOwned,
+    D::KeySwitch: Serialize + DeserializeOwned,
+{
+    use pcs::matrix_weighted::polyfrim::compact::Parameters as Pp;
+    unmasked_backend::<F, EF, Pp<F, EF>, D>(
+        width,
+        attack,
+        "unmasked-polyfrim-compact",
+        |vars, _budget| Pp::new(vars, width, 2, 8).unwrap(),
+    );
+}
+joint_backend_cases!(
+    v11_compact_babybear,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    stages::Shared,
+    unmasked_compact
+);
+joint_backend_cases!(
+    v11_compact_goldilocks,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    stages::Shared,
+    unmasked_compact
+);
+
+fn basis_helpers<F, EF, D>(width: usize, attack: Attack)
+where
+    F: NTTField + Serialize + DeserializeOwned,
+    EF: AbstractExtensionField<F> + Serialize + DeserializeOwned,
+    D: AuditStages<
+            F,
+            EF,
+            Sha256,
+            pcs::matrix_weighted::Parameters<pcs::utils::code::BlockReedSolomonCode<F>>,
+        >,
+    D::Decomposition: Serialize + DeserializeOwned,
+    D::KeySwitch: Serialize + DeserializeOwned,
+{
+    use pcs::{matrix_weighted::Parameters as Pp, utils::code::BlockReedSolomonCode};
+    let dims = Config::new::<F>(32, 21, 8, 5, 1, 1)
+        .unwrap()
+        .variables(width)
+        .unwrap();
+    assert!(
+        [dims[0], dims[2]]
+            .iter()
+            .all(|v| *v != dims[1] && *v != dims[3])
+    );
+    unmasked_backend::<F, EF, Pp<BlockReedSolomonCode<F>>, D>(
+        width,
+        attack,
+        "brakedown-basis-helpers",
+        |vars, _budget| {
+            let original = Pp::balanced_block_rs(vars, width, 8, 2).unwrap();
+            if vars == dims[1] || vars == dims[3] {
+                Pp::new_encoded::<F>(
+                    vars,
+                    EF::D,
+                    original.left_vars(),
+                    8,
+                    original.code().clone(),
+                )
+                .unwrap()
+            } else {
+                original
+            }
+        },
+    );
+}
+joint_backend_cases!(
+    v10_basis_babybear,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    stages::PerLimb,
+    basis_helpers
+);
+joint_backend_cases!(
+    v11_basis_babybear,
+    algebra::BabyBear,
+    algebra::BabyBearExtension6,
+    8,
+    stages::Shared,
+    basis_helpers
+);
+joint_backend_cases!(
+    v10_basis_goldilocks,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    stages::PerLimb,
+    basis_helpers
+);
+joint_backend_cases!(
+    v11_basis_goldilocks,
+    algebra::Goldilocks,
+    algebra::GoldilocksExtension3,
+    4,
+    stages::Shared,
+    basis_helpers
 );

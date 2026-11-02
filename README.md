@@ -1,11 +1,38 @@
 # Artifact for HasteBoots
 
+For mathematical security work, start with the
+[security proof guide](docs/security-proof-guide.md) and the
+[review findings](docs/security-review.md). They distinguish the implemented
+protocol, source arguments, finite test evidence and unproved obligations.
+The checked-in [source baseline](docs/security-proof-baseline.json) identifies
+this review checkpoint; it is not a security certificate.
+
 The performance and packed-protocol experiments are documented in
 [docs/performance.md](docs/performance.md). The original PBS backend remains
-available. The experimental `snarks::packed_pbs` API now composes a complete
+available. The opt-in [unmasked canonical PolyFRIM experiment](docs/unmasked-polyfrim.md)
+reuses complete version-11 PBS without adding a trace-hiding requirement. The experimental `snarks::packed_pbs` API now composes a complete
 binary NAND PBS relation with public input/output and key binding; it is not
 promoted or covered by a complete 128-bit security argument. See
 [the implementation ledger](docs/implementation-status.md) for remaining work.
+
+Prover execution optimizations preserve the complete canonical v11 proof bytes
+and reduce native proving time by about 40% against its frozen control in
+repeated 16-thread warm and cold benchmarks on both fields. Original FHE
+parameters and output keys are retained. The direct PolyFRIM experiment is
+slower and stays opt-in. A separate matched-input comparison against the
+fastest complete v9 fork confirms 37–39% lower latency in both fields and
+reversed orders, with proof sizes below 1.384x v9. These engineering results
+do not establish a security match.
+
+The opt-in version-12 `snarks::packed_pbs::canonical::classical` API binds trusted
+profiles to SHA-512 commitments and framed SHAKE256 challenges. It supports
+Brakedown, direct PolyFRIM (full or dictionary encoding), and unmasked fragmented
+PipFRI (reference or virtual-source opening). These profiles remain experimental;
+their names do not certify 128-bit security. Native correctness validation is
+available through the `classical_native_validation` example and
+`tools/run_classical_native_validation.py`; see the
+[validation instructions](docs/unmasked-polyfrim.md#version-12-native-correctness-validation).
+
 
 This artifact provides experimental data and the source code of the implementation of HasteBoots for reproducing the experimental results reported in the paper. 
 
@@ -45,7 +72,7 @@ For more information, see the [Rust installation guide](https://www.rust-lang.or
 Parameters are set in `vfhe/src/bfhe/parameters.rs`. There are three parameter sets listed in paper:
 
 - Zama: `ZAMA_GOLDILOCKS_PARAMETERS` 
-Note: This parameter is from [this paper](Towards Verifiable FHE in Practice: Proving Correct Execution of TFHE's Bootstrapping using plonky2) where they use an approximate decomposition. Since we only implement the exact full decomposition, so we choose the same decomposition basis $B=2^5$ with a larger $\ell=13$.
+Note: This parameter is from *Towards Verifiable FHE in Practice: Proving Correct Execution of TFHE's Bootstrapping using plonky2*, which uses an approximate decomposition. This implementation uses exact full decomposition with the same basis $B=2^5$ and a larger $\ell=13$.
 - BabyBear: `BABYBEAR_BINARY_128_BITS_PARAMETERS` 
 - Goldilocks: `GOLDILOCKS_BINARY_128_BITS_PARAMETERS`
 
@@ -68,7 +95,9 @@ cargo r -r -p tfhe --example nand_goldilocks
 
 ## VFHE Performance in Table 2
 
-We only implemented and integrated  `Brakedown` PCS in our codebase.
+The paper's benchmarks below use the original `Brakedown` PCS. For the
+experimental canonical PolyFRIM backend and its separate benchmarks, see
+[the experiment documentation](docs/unmasked-polyfrim.md).
 
 To reproduct the results in **table 2** from the paper, simply run
 

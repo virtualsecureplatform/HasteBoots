@@ -6,6 +6,47 @@ from rs_proximity_certificate import (Polynomial, certificate, common_source,
 
 
 class ProximityCertificateTests(unittest.TestCase):
+    def test_power_weighted_fragment_curves_charge_all_cancellation_roots(self):
+        p, points = 97, list(range(6))
+        far = [x*x % p for x in points]
+        for fragments in [1, 4, 8]:
+            audit = exhaustive_check([far]*fragments, points, 2, 1, p, curve=True)
+            self.assertFalse(audit['common_source'])
+            self.assertEqual(audit['near'], fragments-1)
+            self.assertEqual(audit['degree_bound'], (fragments-1)*6*7)
+            self.assertLessEqual(audit['degree'], audit['degree_bound'])
+            if fragments == 1:
+                self.assertEqual(audit['degree'], 0)
+        # Omitting the power-curve degree factor would give n(n+1)=6,
+        # already smaller than the seven actual near challenges here.
+        audit = exhaustive_check([[0, 1]]*8, [0, 1], 1, 0, p, curve=True)
+        self.assertEqual(audit['near'], 7)
+        self.assertGreater(audit['near'], 2*3)
+        self.assertEqual(audit['degree'], 7)
+
+    def test_quadratic_curve_requires_a_fresh_formal_certificate(self):
+        points = list(range(6))
+        rows = [[int(j == i) for j in points] for i in (0, 1, 2)]
+        audit = exhaustive_check(rows, points, 2, 1, 101, curve=True)
+        self.assertFalse(audit['common_source'])
+        self.assertEqual((audit['near'], audit['challenges']), (1, 101))
+        self.assertEqual(audit['degree_bound'], 2*6*7)
+        # Repeated rows project as (1+a+a^2)*row. Over F_103 this has two
+        # roots, so a one-root cancellation argument would be incorrect.
+        row = [x*x % 103 for x in points]
+        audit = exhaustive_check([row]*3, points, 2, 1, 103, curve=True)
+        self.assertEqual((audit['near'], audit['challenges']), (2, 103))
+        self.assertLessEqual(audit['degree'], audit['degree_bound'])
+
+    def test_curve_rational_kernel_still_needs_divisibility(self):
+        p, points = 101, list(range(6))
+        rational = [pow((x-7) % p, p-2, p) for x in points]
+        linear = [(3*x+4) % p for x in points]
+        audit = exhaustive_check([linear, rational, [0]*6], points, 2, 1, p, curve=True)
+        self.assertFalse(audit['common_source'])
+        self.assertEqual((audit['near'], audit['challenges']), (1, p))
+        self.assertLessEqual(audit['degree'], audit['degree_bound'])
+
     def test_every_two_row_matrix_in_a_tiny_rs_instance(self):
         near, far = 0, 0
         for flat in product(range(3), repeat=6):

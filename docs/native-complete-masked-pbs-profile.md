@@ -104,3 +104,18 @@ Executed source bundle SHA-256:
 The same original FHE constants, dimensions, output key, sampling count and
 mask-capacity guard are retained. The allowance fix and its regression evidence
 are detailed in `canonical-opening-budget.md`.
+
+## Completed corrected-budget run 2
+
+The archived run now has successful proving and fresh-process replay exit
+records (both return code zero). The artifact directory contains the decoded
+production verification record; the outer checked report matches its proof
+hash and replay fingerprints. Proof size is 2,632,157,742 bytes, proving is
+6,738.841116052 seconds, and GNU time records 46,728,988 KiB peak RSS.
+The production report records altered-output rejection. The earlier pending
+status describes launch-time evidence and is superseded here.
+
+The report checker checks consistency, not cryptographic validity; production
+Rust verification is recorded separately. Timing exclusions still apply.
+These results do not establish a controlled speedup, whole-proof 128-bit
+security, hiding, or a successful new-backend performance gate.

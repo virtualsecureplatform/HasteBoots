@@ -31,6 +31,7 @@ sha2 = { version = "0.10", features = ["asm"] }
 sha2 = { version = "0.10" }
 
 [features]
+transcript-audit = ["snarks/transcript-audit"]
 default = ["concrete-ntt"]
 concrete-ntt = [
     "algebra/concrete-ntt",
@@ -41,6 +42,7 @@ nightly = ["algebra/nightly", "lattice/nightly", "fhe_core/nightly"]
 count_ntt = ["algebra/count_ntt"]
 
 [dev-dependencies]
+serde = { workspace = true }
 criterion = { workspace = true }
 sumcheck = { path = "../sumcheck" }
 
@@ -179,3 +181,15 @@ path = "examples/performance/packed_batch_babybear.rs"
 [[example]]
 name = "packed_batch_pbs_goldilocks"
 path = "examples/performance/packed_batch_goldilocks.rs"
+
+[[example]]
+name = "canonical_polyfrim_pbs"
+path = "examples/performance/canonical_polyfrim_pbs.rs"
+
+[[example]]
+name = "classical_native_validation"
+path = "examples/performance/classical_native_validation.rs"
+
+[[example]]
+name = "classical_profile_grid"
+path = "examples/performance/classical_profile_grid.rs"

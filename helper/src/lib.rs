@@ -1,6 +1,8 @@
 //! Utilities for zk-proof systems.
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![deny(missing_docs)]
+/// Versioned SHAKE256 byte transcript for classical-profile integration.
+pub mod classical_transcript;
 /// Transcript module for Fiat-Shamir transforms.
 pub mod transcript;
 /// Utilities for zk-proof systems.

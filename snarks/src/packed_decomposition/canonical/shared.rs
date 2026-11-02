@@ -46,6 +46,35 @@ where
     P: CanonicalPcs<F, H>,
     R: Rng + CryptoRng,
 {
+    prove_with_statistics::<F, EF, H, P, R>(
+        trans,
+        config,
+        source,
+        borrow,
+        helper,
+        digits,
+        &mut crate::packed_extension_lookup::ProverStatistics::default(),
+        rng,
+    )
+}
+/// Prove with lookup phase counters; counters never enter the transcript.
+pub fn prove_with_statistics<F, EF, H, P, R>(
+    trans: &mut Transcript<F>,
+    config: &Config,
+    source: &CanonicalProverOracle<'_, F, H, P>,
+    borrow: &P,
+    helper: &P,
+    digits: &[&CanonicalProverOracle<'_, F, H, P>],
+    statistics: &mut crate::packed_extension_lookup::ProverStatistics,
+    rng: &mut R,
+) -> Result<Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>, Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    R: Rng + CryptoRng,
+{
     let public: Vec<_> = digits.iter().map(|d| d.verifier()).collect();
     bind::<F, EF, H, P>(trans, config, &source.verifier(), borrow, helper, &public)?;
     let columns = borrow_tables::<F, H, P>(config, source, digits)?;
@@ -75,11 +104,12 @@ where
         packed_linear::prove_canonical::<F, H, P>(trans, &linear_sources, &relations::<F>(config)?)
             .map_err(convert)?;
     let registry: Vec<_> = digits.iter().copied().chain(borrows.iter()).collect();
-    let comparisons = comparisons::prove::<F, EF, H, P, R>(
+    let comparisons = comparisons::prove_with_statistics::<F, EF, H, P, R>(
         trans,
         helper,
         &registry,
         &comparison_requests::<F>(config)?,
+        statistics,
         rng,
     )
     .map_err(convert)?;

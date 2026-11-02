@@ -607,6 +607,14 @@ fn child<F: PrimeField + Serialize, EF: AbstractExtensionField<F>>(
     multiplicities: &[F],
 ) -> Transcript<EF> {
     parent.append_message(b"extension lookup multiplicities", &multiplicities);
+    if parent.is_classical() {
+        return parent
+            .fork_classical_extension::<F, EF>(
+                b"classical extension lookup child v1",
+                b"packed extension tuple lookup",
+            )
+            .expect("classical lookup parent");
+    }
     let mut seed = [0u8; 64];
     parent.get_challenge_bytes(b"extension lookup child seed v1", &mut seed);
     let mut child = Transcript::<EF>::new_direct_extension::<F>();
@@ -614,6 +622,12 @@ fn child<F: PrimeField + Serialize, EF: AbstractExtensionField<F>>(
     child
 }
 fn finish_child<F: Field, EF: Field>(parent: &mut Transcript<F>, child: &mut Transcript<EF>) {
+    if parent.is_classical() {
+        parent
+            .finish_classical_child(child)
+            .expect("linked classical lookup child");
+        return;
+    }
     let mut digest = [0u8; 32];
     child.get_challenge_bytes(b"extension lookup algebra digest", &mut digest);
     parent.append_message(b"extension lookup algebra transcript", &digest);
@@ -647,6 +661,8 @@ fn challenges<F: PrimeField, EF: AbstractExtensionField<F> + Serialize>(
                 if r != EF::zero() && !table.iter().any(|&t| r + t == EF::zero()) {
                     break r;
                 }
+                #[cfg(feature = "transcript-audit")]
+                child.audit_resource_event(helper::classical_transcript::audit::ResourceEvent::LookupReciprocalRejected);
             };
             let denominators: Vec<_> = table.iter().map(|&t| r + t).collect();
             let inverses = table_reciprocals::<F, EF>(&denominators);
@@ -912,3 +928,57 @@ mod tests {
 
 /// Extension algebra over statically selected canonical PCS backends.
 pub mod canonical;
+
+#[cfg(all(test, feature = "transcript-audit"))]
+mod retry_audit_tests {
+    use super::*;
+    use num_traits::{One, Zero};
+    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+    #[test]
+    fn reciprocal_retry_observer_follows_actual_rejection_branch() {
+        type F = algebra::BabyBear;
+        type E = algebra::BabyBearExtension6;
+        let profile = [81; 64];
+        let mut reference = Transcript::<E>::new_classical_extension::<F>(&profile);
+        let y = reference.get_challenge(b"extension tuple hash challenge");
+        let rejected = reference.get_challenge(b"extension tuple reciprocal challenge");
+        let accepted = reference.get_challenge(b"extension tuple reciprocal challenge");
+        assert!(rejected != E::zero() && accepted != E::zero() && accepted != rejected);
+        let mut power = E::one();
+        let powers = (0..E::D).map(|_| { let value = power; power *= y; value }).collect::<Vec<_>>();
+        // This is an isolated sampler branch fixture, not an adversarial proof:
+        // choose a table point whose compression equals -the first draw.
+        let mut rows = (0..E::D).map(|i| {
+            powers.iter().map(|value| value.as_base_slice()[i])
+                .chain(std::iter::once(-rejected.as_base_slice()[i])).collect::<Vec<_>>()
+        }).collect::<Vec<_>>();
+        for column in 0..E::D {
+            let pivot = (column..E::D).find(|&row| rows[row][column] != F::zero()).expect("fixed power basis");
+            rows.swap(column, pivot);
+            let scale = F::one() / rows[column][column];
+            for value in &mut rows[column] { *value *= scale; }
+            let normalized = rows[column].clone();
+            for row in 0..E::D {
+                if row == column { continue; }
+                let factor = rows[row][column];
+                for i in 0..=E::D { rows[row][i] -= factor * normalized[i]; }
+            }
+        }
+        let point = rows.iter().map(|row| row[E::D]).collect::<Vec<_>>();
+        let config = Config::new(1, vec![point], 1).unwrap();
+        let retries = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&retries);
+        let guard = helper::classical_transcript::audit::observe_with_resources(|_| {}, move |event| {
+            if event == helper::classical_transcript::audit::ResourceEvent::LookupReciprocalRejected {
+                observed.fetch_add(1, Ordering::Relaxed);
+            }
+        }).unwrap();
+        let mut actual = Transcript::<E>::new_classical_extension::<F>(&profile);
+        let result = challenges::<F, E>(&mut actual, &config);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].powers, powers);
+        assert_eq!(result[0].r, accepted);
+        assert_eq!(retries.load(Ordering::Relaxed), 1);
+        drop(guard);
+    }
+}

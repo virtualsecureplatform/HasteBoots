@@ -35,7 +35,9 @@ sha2 = { version = "0.10" }
 
 [dev-dependencies]
 criterion = { workspace = true }
+sha3 = "0.10"
 
 [features]
 default = ["extension_field"]
 extension_field = []
+transcript-audit = ["helper/transcript-audit", "pcs/hash-audit", "pcs/transcript-audit"]

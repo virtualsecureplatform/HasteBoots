@@ -23,6 +23,7 @@ where
         borrow: &P,
         helper: &P,
         digits: &[&CanonicalProverOracle<'_, F, H, P>],
+        statistics: &mut crate::packed_extension_lookup::ProverStatistics,
         rng: &mut R,
     ) -> Result<Self::Decomposition, Error>;
     fn verify_decomposition(
@@ -77,10 +78,13 @@ macro_rules! backend {
                 borrow: &P,
                 helper: &P,
                 digits: &[&CanonicalProverOracle<'_, F, H, P>],
+                statistics: &mut crate::packed_extension_lookup::ProverStatistics,
                 rng: &mut R,
             ) -> Result<Self::Decomposition, Error> {
-                $radix::prove::<F, EF, H, P, R>(trans, cfg, source, borrow, helper, digits, rng)
-                    .map_err(convert)
+                $radix::prove_with_statistics::<F, EF, H, P, R>(
+                    trans, cfg, source, borrow, helper, digits, statistics, rng,
+                )
+                .map_err(convert)
             }
             fn verify_decomposition(
                 trans: &mut Transcript<F>,
@@ -134,4 +138,11 @@ backend!(
     shared_key,
     11,
     b"HasteBoots complete canonical-backend binary NAND PBS v11"
+);
+backend!(
+    ClassicalShared,
+    shared_radix,
+    shared_key,
+    12,
+    b"HasteBoots complete classical-profile binary NAND PBS v12"
 );

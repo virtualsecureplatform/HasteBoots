@@ -160,6 +160,50 @@ and shared columns. Merkle availability/extraction, full adaptive composition
 and Fiat-Shamir still require analysis. The lifting check alone does not cover
 partially padded symbols or certify concrete whole-proof security.
 
+### Fewer packed test rows than RS symbol coordinates
+
+The opt-in helper-basis profile keeps RS symbol width b=8/4 but uses h=6/3
+packed lanes and random-test rows. Equal encoders therefore do **not** imply
+equal random-test entropy. Let K/F have degree b, with the same fixed basis
+e_0,...,e_(b-1) used above, and define
+
+```text
+S = span_F(e_0,...,e_(h-1)),  |S| = p^h,
+alpha_i = sum_(a=0)^(h-1) e_a R[a,i].
+```
+
+For independent uniform interactive F-coins, the basis-coordinate map is a
+bijection F^h -> S for each input row. Thus alpha is uniform in S^r, even
+though S need not be a subfield of K. Acceptance of all h base checks implies
+acceptance of their K-linear combination, exactly as in the preceding lifting
+identity. No embedding of the degree-six lookup field into the degree-eight
+RS symbol field is used; S is only a set of code-field coefficients.
+
+Given the nonzero exceptional polynomial P(T) of total degree at most n(n+1)
+constructed in the fixed-word derivation below, finite-subset Schwartz–Zippel
+therefore gives the conditional bound
+
+```text
+Pr_[alpha <- S^r][P(alpha)=0] <= min(1, n(n+1)/p^h).
+```
+
+This step requires no closure of S under multiplication. To see the finite-set
+bound directly, view P as a polynomial in its last variable of degree j, with
+nonzero leading coefficient of degree at most deg(P)-j in the others. Induction
+bounds the leading-coefficient failure by (deg(P)-j)/|S|; otherwise a nonzero
+univariate polynomial has at most j roots in S. Adding these bounds gives
+deg(P)/|S|. The base case is the ordinary univariate root bound.
+
+The changed denominator is p^h, not p^b. `pcs/tests/block_rs_lift.rs` now checks
+both six-test/eight-coordinate and three-test/four-coordinate identities,
+including independent Horner, transposed-weight and corrupted-column controls.
+These tests support the algebraic map; they do not prove availability,
+Fiat–Shamir, the exceptional-polynomial construction, or a complete PCS bound.
+The comparison runner reports this per-opening fixed-word term separately from
+all promotion/security flags, which remain false. A complete budget must still
+include the unchanged sampling, structured-response and algebra errors, the
+number of openings/proofs, and the unresolved adaptive/hash composition.
+
 ## RS-specific fixed-word bound: derivation for review
 
 This is a new derivation, not a bound quoted from 2025/719 or its inaccessible
@@ -254,6 +298,119 @@ n(n+1)<=n^k. Thus the current `(n/p)^k` random-test term and
 validate partially padded symbols, other codes, all low-width API settings,
 Merkle availability/extraction or complete transcript security. The existing
 budget implementation and measured parameters are deliberately unchanged.
+
+### Conditional padding-consistency step
+
+The fixed-word argument can also account for partial final symbols and entire
+unused coefficient blocks. Let the scalar message length be L, symbol width b,
+and RS coefficient-block count m, so the encoder pads scalar coefficient
+positions `Z = {L,...,b*m-1}` with zero. Identify symbols with a degree-b
+extension K/F as above; the encoder is coordinate-wise RS over base-field
+domain points. Suppose the fixed committed rows have unique common nearby
+RS words, with a common error set of size at most t. Their decoded coefficient
+vectors need not have zero entries on Z: being RS-near alone does not enforce
+the source's message shape.
+
+If a padded position is nonzero in at least one decoded source row, fix one
+such position. Its coefficients across source rows form a nonzero vector over
+F. Each of the h independent base-field test rows kills this vector with
+probability exactly `1/p`; all h rows kill it with probability `p^-h`.
+Requiring all padded positions to vanish can only reduce that probability.
+The nearby words and this nonzero coordinate vector must be fixed before the
+whole random-test matrix is sampled.
+
+Otherwise some test row's correct linear combination of decoded RS words has
+a nonzero padded coefficient. Every supplied random-test response has exactly
+L scalar coefficients, and its verifier-side encoding pads Z with zero.
+Therefore its RS codeword differs from that correct combination. Their block
+distance is at least `D = n-m+1`. The random combination of the committed rows
+differs from its decoded combination only on the common t-column error set,
+so the supplied response disagrees with the authenticated committed combination
+on at least D-t columns. This mismatch set is fixed before column sampling.
+Shared sampling with the structured response does not remove this particular
+rejecting set.
+
+If every decoded source row already has zero padding, deleting Z gives a
+well-shaped source table and the earlier false-structured-response argument
+applies. Thus the fixed-word near case has error at most
+`p^-h + (1-(D-t)/n)^Q`. For a far source, the earlier subspace/RS exceptional
+bound applies. For `h<=b`, `n>=1`, and the selected
+`t=floor((D-1)/3)`, the single conservative envelope
+
+```
+n(n+1)/p^h + (1-(t+1)/n)^Q
+```
+
+dominates both cases; near/far are properties of the fixed source before its
+test, so this step does not sum their exceptional probabilities. When padding
+is absent the extra near-case event is empty. This is still conditional on the
+fixed-word RS lemma, unique nearby decoding, availability at the correct freeze
+and ideal independent test/sampling phases. It supplies no complete
+Fiat–Shamir or PBS knowledge theorem.
+
+The production regression `matrix_weighted::padded_source_tests` commits genuine
+RS columns with a nonzero forbidden padded coordinate. The structured query
+is zero, isolating the random test. It checks real authentication paths and
+decoded proofs, requiring rejection for a linear-response mismatch rather than
+a path failure, alongside an accepted zero-source control. Both ordinary and
+helper-basis test-row widths are covered over BabyBear and Goldilocks. These
+finite controls support the implementation mapping, not the probability proof.
+
+### Conditional row-code component state and shared batches
+
+Work in an ideal fixed-word game with authentic column answers. Fix the
+committed row matrix, trusted code/shape, ordered queries and all claimed
+values before the random-test matrix. Each row has n block symbols over the
+analysis field K; let h be the number of base-field test rows and b the symbol
+width, with `h<=b`. Use `t=floor((D-1)/3)` as above. The false component relation
+means that the rows are not jointly within t columns of uniquely decoded,
+correctly padded source rows, or that some claimed opening differs from that
+decoded source. This relation and decoding convention must be coupled to the
+enclosing oracle relation separately.
+
+Initially call the component state bad for a false component relation. After
+the whole random-test phase, use this stronger intermediate predicate: for
+every dimension-valid response packet, either its final claimed-value equation
+fails or at least t+1 columns reject a linear-response check. The preceding
+case analysis establishes this predicate except with probability at most
+`min(1,n(n+1)/p^h)`:
+
+* A jointly far source has a far projected test, outside the RS exceptional set.
+  Any coded test response then disagrees on at least t+1 columns.
+* A near source with nonzero decoded padding has a test response mismatch on
+  at least D-t columns, unless all h test rows kill that padding residual.
+* For a valid padded decoded source and a false claimed opening, a response
+  agreeing with the decoded structured response gives the correct value and
+  fails the claimed-value equation. Any other response differs by an RS
+  codeword and rejects at least D-t columns.
+
+These are cases of one fixed source, so the random-test escape bound is the
+maximum of their exceptional probabilities, not a sum. The universal
+intermediate predicate gives closure under the prover's response choice.
+After responses, keep the state bad when the actual final equation fails or
+the actual rejecting column set has size at least t+1. The set is fixed before
+the complete with-replacement column-sampling phase, whose bad-to-good error
+is at most `(1-(t+1)/n)^Q`. Duplicate-path transport after sampling does not
+change that event. After sampling, an invalid final equation or any sampled
+rejecting column keeps the state bad; ideal authentication prevents later
+path responses from turning that state into acceptance.
+
+For a batch with at least one false claim, select its first false claim under
+the fixed decoded source before drawing the test matrix. Its left-prefix
+response group is already determined by the bound query list. If that shared
+response is correct, the selected false claim's final equation fails;
+otherwise the same D-t argument supplies a rejecting set. This needs no
+independence between claims, groups, the test response or the shared column
+samples. Actual `bind_many` fixes the complete list, `get_vec_challenge` draws
+one h-by-rows test matrix, and the response list is absorbed before
+`sample_columns`. Group reuse checks exact ordered left-prefix equality.
+
+This supplies component-level conditional transition bounds, including
+padding and shared batches. It is not a state predicate for the whole PBS
+proof, does not itself fix words at adversarial first-query times, and relies
+on the RS exceptional-polynomial and semantic availability premises. Global
+Merkle/link resources, Fiat–Shamir composition and witness extraction still
+need to be supplied before a concrete security-qualified query count follows.
 `tools/audit_rs_layouts.py` checks the stated geometry and numeric domination
 against saved complete-proof layouts; it does not label a protocol promoted.
 
@@ -489,6 +646,14 @@ remaining distinct from original-size performance or correctness evidence.
 | BabyBear lane16, width eight | 4 | 7 | 2 | 90 |
 | Goldilocks extension, one pair | 8 | 13 | 1 | 131 |
 
+The table and formula above describe the legacy `inventory` proof schema.
+Canonical v11 uses `canonical_shared_inventory`: for the selected one-pair
+profile its outer private slots are 8d+4s+16, or 76 BabyBear / 132 Goldilocks.
+The native observer confirms those counts and separately sees trusted-key
+openings. These outer slots do not count PolyFRIM's internal ladder/rolling
+roots or provide their freeze schedule. See `unmasked-polyfrim.md` for the
+separate API-call observations and conditional per-owner query ceiling.
+
 These counts replace hypothetical R values when evaluating the selected proof
 schema's hash worksheet. They do not determine T: total adversarial/honest hash
 queries and the number of attempted proofs still need explicit resource bounds.
@@ -509,3 +674,60 @@ is not claimed as a matched historical field. No original-size timing comparison
 was run: these debug correctness runs overlapped compilation/tests. Sources,
 logs and digest-linked inventories are archived under
 `target/performance/complete-root-inventory/`.
+
+### Hash-output bound on single and batch verifier calls
+
+For fixed trusted `BlockReedSolomonCode` parameters with N column symbols and
+Q ordered draws, each call to `Parameters::verify` or `verify_many` produces at
+most `1 + min(Q,N)*(1+log2(N))` outputs through its generic hash interface.
+The one extra output is the trusted parameter-context digest. Shape checks
+require a nonempty column list of size at most min(Q,N), exact symbol lengths,
+and paths of length `1+log2(N)` before authentication. Each column hashes its
+values once, then `MerkleTree::check` hashes at most log2(N) parent pairs.
+All other operations in these two methods are arithmetic, encoding or transcript
+operations. Counting every column bounds all joined parallel workers even when
+one reports failure. A single malformed proof shape rejects before the context
+hash; a batch shape rejects after its binding context hash. Malformed queries
+can reject earlier still. The bound concerns every finite execution prefix and
+does not require a field/column retry cutoff: a sampler that keeps running does
+not introduce additional outputs through this hash interface.
+
+The reusable `classical_hash_resources` counter test now checks 264 rejected
+single/batch calls across both fields, v4/v5 and Q=1,8,40 with N=32. Cases cover
+empty/oversized response or column vectors, short/long paths, changed symbol
+values, changed leaf digests and changed sibling digests. Early shape failures
+match the exact zero/one context-output counts; well-shaped authentication
+failures satisfy the full bound. The accepted five-backend controls also pass.
+This validates the component hash-output bound, not parent call counts, XOF
+input/output bytes, all-stage work bounds or security admission. Frozen evidence
+is under `rejected-brakedown-hash-resources-*` in the opening inventory.
+
+### Transcript resources on rejected calls
+
+The same rejected-call controls also pass with transcript observation enabled
+and disabled. All 192 malformed-shape calls request zero transcript randomness.
+The 72 later authentication failures complete one field phase with
+`C = width^2 * 2^left_vars` base-field values, followed by its 64-byte receipt.
+V4 consumes one eight-byte request per actual column candidate, retaining all Q
+ordered accepted draws; v5 consumes one fixed `8*Q` byte block. The observer
+checks actual raw field bytes against candidate counts and base-field widths,
+as well as total returned bytes and reader counts. These checks use Q=40 above
+the 32-symbol domain as well as smaller quotas.
+
+For any single/batch call on trusted fixed parameters, one field raw reader
+and its receipt contribute at most two XOF requests. Under the analysis stop
+before a value exceeds R_F candidates, raw field output is at most `C*R_F*d`
+bytes, where d is the sampler's masked field-candidate width. Under the v4
+column stop, column requests/bytes are at most `Q*R_C` and `8*Q*R_C`.
+V5 instead has one column request and exactly `8*Q` column bytes, with no
+column-rejection stop. Prefixes ending at earlier rejection or analysis stops
+cannot increase these totals. No production retry limit is added.
+
+`classical_brakedown_resources.call_envelope` records these single-call bounds,
+the unconditional hash-output bound, and the assumptions separately. Its
+geometry-only arithmetic reconciles the existing native PCS request/hash
+worksheets for all four roles, both fields and v4/v5 (16 combinations). It
+does not evaluate soundness-probability powers to compute resource counts;
+even a large valid v4 quota is handled as integer arithmetic. Parent call
+ceilings, input-string construction and whole-verifier work remain excluded.
+Frozen evidence is in `brakedown-call-resources-*` in the opening inventory.

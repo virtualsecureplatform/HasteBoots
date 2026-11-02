@@ -8,6 +8,10 @@ use algebra::{AbstractExtensionField, AsFrom, AsInto, Field, PrimeField};
 use algebra::utils::{Block, Prg};
 
 use crate::FiatShamirTranscript;
+use crate::classical_transcript::ClassicalTranscript;
+
+/// Explicit framed SHAKE256 sampling protocol; not a security certificate.
+pub const CLASSICAL_TRANSCRIPT_ID: &str = "framed-shake256-canonical-rejection-v1";
 
 /// Direct prime-field sampling protocol identifier.
 pub const DIRECT_TRANSCRIPT_ID: &str = "merlin-direct-canonical-rejection-v1";
@@ -25,20 +29,48 @@ enum Sampling<F> {
     Extension(fn(&mut merlin::Transcript, &'static [u8], usize, &[u8]) -> Vec<F>),
 }
 
-/// A Merlin transcript with an explicitly selected field-challenge protocol.
+struct ParentBinding {
+    profile: [u8; 64],
+    checkpoint: [u8; 64],
+    label: &'static [u8],
+}
+
+/// Versioned field transcript: legacy Merlin constructors or explicit SHAKE256.
 pub struct Transcript<F: Field> {
     transcript: merlin::Transcript,
     sampling: Sampling<F>,
+    classical_parent: Option<ParentBinding>,
+    atomic_ntt_rows: bool,
+    atomic_joint_projections: bool,
+    atomic_zerocheck: bool,
+    atomic_brakedown_columns: bool,
+    classical: Option<(
+        ClassicalTranscript,
+        fn(&mut ClassicalTranscript, &'static [u8], usize, &[u8]) -> Vec<F>,
+    )>,
     _marker: PhantomData<F>,
 }
 
 impl<F: Field> Transcript<F> {
+    /// Optional analysis event; never transcript data or a runtime limit.
+    #[cfg(feature = "transcript-audit")]
+    pub fn audit_resource_event(&self, event: crate::classical_transcript::audit::ResourceEvent) {
+        if let Some((classical, _)) = &self.classical {
+            classical.audit_resource_event(event);
+        }
+    }
     /// Create a new IOP transcript.
     #[inline]
     pub fn new() -> Self {
         Self {
             transcript: merlin::Transcript::new(b""),
             sampling: Sampling::LegacyPrg128,
+            classical_parent: None,
+            atomic_ntt_rows: false,
+            atomic_joint_projections: false,
+            atomic_zerocheck: false,
+            atomic_brakedown_columns: false,
+            classical: None,
             _marker: PhantomData,
         }
     }
@@ -51,6 +83,12 @@ impl<F: Field> Transcript<F> {
         Self {
             transcript: merlin::Transcript::new(DIRECT_DOMAIN),
             sampling: Sampling::Direct,
+            classical_parent: None,
+            atomic_ntt_rows: false,
+            atomic_joint_projections: false,
+            atomic_zerocheck: false,
+            atomic_brakedown_columns: false,
+            classical: None,
             _marker: PhantomData,
         }
     }
@@ -100,8 +138,233 @@ impl<F: Field> Transcript<F> {
         Self {
             transcript,
             sampling: Sampling::Extension(extension_values::<Base, F>),
+            classical_parent: None,
+            atomic_ntt_rows: false,
+            atomic_joint_projections: false,
+            atomic_zerocheck: false,
+            atomic_brakedown_columns: false,
+            classical: None,
             _marker: PhantomData,
         }
+    }
+
+    /// Select the new prime-field protocol with an independently trusted profile.
+    /// Existing constructors continue to select their original protocols.
+    pub fn new_classical(profile: &[u8; 64]) -> Self
+    where
+        F: PrimeField,
+    {
+        let mut value = Self::new();
+        let mut bytes = ClassicalTranscript::new(b"HasteBoots typed classical prime v1", profile);
+        let p: u128 = F::MODULUS_VALUE.as_into();
+        bytes.append_bytes(b"typed prime field", &p.to_le_bytes());
+        value.classical = Some((bytes, classical_prime::<F>));
+        value
+    }
+
+    /// Select the new extension-field protocol, binding its full basis before
+    /// any caller challenge through a zero-element identity phase.
+    pub fn new_classical_extension<Base: PrimeField>(profile: &[u8; 64]) -> Self
+    where
+        F: AbstractExtensionField<Base>,
+    {
+        let mut value = Self::new();
+        let mut bytes =
+            ClassicalTranscript::new(b"HasteBoots typed classical extension v1", profile);
+        bytes
+            .challenge_extension::<Base, F>(b"typed extension identity", 0)
+            .expect("trusted extension field identity");
+        value.classical = Some((bytes, classical_extension::<Base, F>));
+        value
+    }
+
+    /// Whether this transcript uses the explicitly selected classical byte engine.
+    pub fn is_classical(&self) -> bool {
+        self.classical.is_some()
+    }
+
+    /// Opt-in schedule: draw the complete NTT row-point block in one phase.
+    /// Existing classical constructors retain their original schedules.
+    pub fn new_classical_atomic_ntt(profile: &[u8; 64]) -> Self
+    where
+        F: PrimeField,
+    {
+        let mut value = Self::new_classical(profile);
+        value.atomic_ntt_rows = true;
+        value
+            .classical
+            .as_mut()
+            .expect("classical engine")
+            .0
+            .append_bytes(b"classical challenge schedule", b"atomic NTT row phase v2");
+        value
+    }
+
+    /// Version-three schedule: atomic NTT rows and joint PolyFRIM projections.
+    pub fn new_classical_atomic_phases(profile: &[u8; 64]) -> Self
+    where
+        F: PrimeField,
+    {
+        let mut value = Self::new_classical_atomic_ntt(profile);
+        value.atomic_joint_projections = true;
+        value
+            .classical
+            .as_mut()
+            .expect("classical engine")
+            .0
+            .append_bytes(
+                b"classical challenge schedule",
+                b"atomic joint projections v3",
+            );
+        value
+    }
+
+    /// Version four also groups packed ZeroCheck equality and first-round coins.
+    pub fn new_classical_atomic_zerocheck(profile: &[u8; 64]) -> Self
+    where
+        F: PrimeField,
+    {
+        let mut value = Self::new_classical_atomic_phases(profile);
+        value.atomic_zerocheck = true;
+        value
+            .classical
+            .as_mut()
+            .expect("classical engine")
+            .0
+            .append_bytes(
+                b"classical challenge schedule",
+                b"atomic packed zerocheck v4",
+            );
+        value
+    }
+
+    /// Version five also draws a complete Brakedown column block atomically.
+    pub fn new_classical_atomic_columns(profile: &[u8; 64]) -> Self
+    where
+        F: PrimeField,
+    {
+        let mut value = Self::new_classical_atomic_zerocheck(profile);
+        value.atomic_brakedown_columns = true;
+        value
+            .classical
+            .as_mut()
+            .expect("classical engine")
+            .0
+            .append_bytes(
+                b"classical challenge schedule",
+                b"atomic Brakedown columns v5",
+            );
+        value
+    }
+
+    /// Whether the trusted schedule groups all Brakedown column indices.
+    pub fn uses_atomic_brakedown_columns(&self) -> bool {
+        self.atomic_brakedown_columns
+    }
+
+    /// Selected by the trusted profile; previous schedules keep separate phases.
+    pub fn uses_atomic_zerocheck(&self) -> bool {
+        self.atomic_zerocheck
+    }
+
+    /// Selected by a trusted versioned profile, including for extension children.
+    pub fn uses_atomic_joint_projections(&self) -> bool {
+        self.atomic_joint_projections
+    }
+
+    /// Selected by a trusted versioned profile, never inferred from a proof.
+    pub fn uses_atomic_ntt_rows(&self) -> bool {
+        self.atomic_ntt_rows
+    }
+
+    /// Start a detached extension child whose finalization checks parent lineage.
+    /// Classical protocol callers must finish it before advancing the parent.
+    pub fn fork_classical_extension<Base: PrimeField, EF: AbstractExtensionField<Base>>(
+        &mut self,
+        label: &'static [u8],
+        context: &[u8],
+    ) -> Result<Transcript<EF>, &'static str> {
+        let (parent, _) = self.classical.as_mut().ok_or("classical parent required")?;
+        let mut bytes = parent.fork_child(label, context);
+        let binding = ParentBinding {
+            profile: parent.profile_id(),
+            checkpoint: parent.checkpoint(),
+            label,
+        };
+        bytes
+            .challenge_extension::<Base, EF>(b"typed extension identity", 0)
+            .expect("trusted extension identity");
+        let mut child = Transcript::<EF>::new();
+        child.classical = Some((bytes, classical_extension::<Base, EF>));
+        child.classical_parent = Some(binding);
+        child.atomic_ntt_rows = self.atomic_ntt_rows;
+        child.atomic_joint_projections = self.atomic_joint_projections;
+        child.atomic_zerocheck = self.atomic_zerocheck;
+        child.atomic_brakedown_columns = self.atomic_brakedown_columns;
+        Ok(child)
+    }
+
+    /// Absorb a linked child's finish fingerprint exactly once. A wrong or
+    /// advanced parent rejects without changing either transcript.
+    pub fn finish_classical_child<EF: Field>(
+        &mut self,
+        child: &mut Transcript<EF>,
+    ) -> Result<(), &'static str> {
+        let binding = child
+            .classical_parent
+            .as_ref()
+            .ok_or("missing or spent child binding")?;
+        let (parent, _) = self.classical.as_mut().ok_or("classical parent required")?;
+        let (bytes, _) = child.classical.as_mut().ok_or("classical child required")?;
+        if parent.profile_id() != binding.profile
+            || bytes.profile_id() != binding.profile
+            || parent.checkpoint() != binding.checkpoint
+        {
+            return Err("classical child parent mismatch");
+        }
+        parent.finish_linked_child(binding.label, bytes);
+        child.classical_parent = None;
+        Ok(())
+    }
+
+    /// Run a scoped extension-field child without permitting an implicit
+    /// downgrade to Merlin. Legacy parents reject before transcript mutation.
+    /// The closure is trusted protocol code; replacing its transcript with a
+    /// legacy instance is a programmer error and panics at finalization.
+    pub fn with_classical_extension_child<Base, EF, R>(
+        &mut self,
+        label: &[u8],
+        context: &[u8],
+        run: impl FnOnce(&mut Transcript<EF>) -> R,
+    ) -> Result<R, &'static str>
+    where
+        Base: PrimeField,
+        EF: AbstractExtensionField<Base>,
+    {
+        let atomic_columns = self.atomic_brakedown_columns;
+        let (parent, _) = self
+            .classical
+            .as_mut()
+            .ok_or("classical child requires a classical parent")?;
+        Ok(parent.with_owned_child(label, context, |mut bytes| {
+            bytes
+                .challenge_extension::<Base, EF>(b"typed extension identity", 0)
+                .expect("trusted extension field identity");
+            let mut child = Transcript::<EF>::new();
+            child.classical = Some((bytes, classical_extension::<Base, EF>));
+            if atomic_columns {
+                child.atomic_ntt_rows = true;
+                child.atomic_joint_projections = true;
+                child.atomic_zerocheck = true;
+                child.atomic_brakedown_columns = true;
+            }
+            let result = run(&mut child);
+            let (bytes, _) = child
+                .classical
+                .take()
+                .expect("classical child mode must remain fixed");
+            (bytes, result)
+        }))
     }
 
     fn direct_values(&mut self, label: &'static [u8], count: usize, kind: &[u8]) -> Vec<F> {
@@ -132,11 +395,40 @@ impl<F: Field> Transcript<F> {
             })
             .collect()
     }
+
+    /// Sample one complete index phase in classical mode. Existing modes keep
+    /// their original sequence of eight-byte requests without extra framing.
+    pub fn get_index_challenges(
+        &mut self,
+        label: &'static [u8],
+        domain: usize,
+        count: usize,
+    ) -> Result<Vec<usize>, &'static str> {
+        if !domain.is_power_of_two() || count.checked_mul(8).is_none() {
+            return Err("invalid index phase dimensions");
+        }
+        if let Some((bytes, _)) = &mut self.classical {
+            return bytes.challenge_indices(label, domain, count);
+        }
+        Ok((0..count)
+            .map(|_| {
+                let mut bytes = [0; 8];
+                self.get_challenge_bytes(label, &mut bytes);
+                (u64::from_le_bytes(bytes) & (domain as u64 - 1)) as usize
+            })
+            .collect())
+    }
 }
 
 impl<F: Field> FiatShamirTranscript<F> for Transcript<F> {
     /// Append the message to the transcript.
     fn append_message<M: Serialize>(&mut self, label: &'static [u8], msg: &M) {
+        if let Some((bytes, _)) = &mut self.classical {
+            bytes
+                .append_message(label, msg)
+                .expect("serializable public message");
+            return;
+        }
         self.transcript.append_message(
             label,
             &bincode::serde::encode_to_vec(msg, bincode::config::standard()).unwrap(),
@@ -146,11 +438,18 @@ impl<F: Field> FiatShamirTranscript<F> for Transcript<F> {
     /// Generate the challenge bytes from the current transcript
     #[inline]
     fn get_challenge_bytes(&mut self, label: &'static [u8], bytes: &mut [u8]) {
+        if let Some((transcript, _)) = &mut self.classical {
+            transcript.challenge_bytes(label, bytes);
+            return;
+        }
         self.transcript.challenge_bytes(label, bytes);
     }
 
     /// Generate the challenge from the current transcript
     fn get_challenge(&mut self, label: &'static [u8]) -> F {
+        if let Some((bytes, sample)) = &mut self.classical {
+            return sample(bytes, label, 1, b"scalar")[0];
+        }
         if matches!(self.sampling, Sampling::Direct) {
             return self.direct_values(label, 1, b"scalar")[0];
         }
@@ -165,6 +464,9 @@ impl<F: Field> FiatShamirTranscript<F> for Transcript<F> {
 
     /// Generate the challenge vector from the current transcript
     fn get_vec_challenge(&mut self, label: &'static [u8], num: usize) -> Vec<F> {
+        if let Some((bytes, sample)) = &mut self.classical {
+            return sample(bytes, label, num, b"vector");
+        }
         if matches!(self.sampling, Sampling::Direct) {
             return self.direct_values(label, num, b"vector");
         }
@@ -176,6 +478,26 @@ impl<F: Field> FiatShamirTranscript<F> for Transcript<F> {
         let mut prg = Prg::from_seed(Block::from(seed));
         (0..num).map(|_| F::random(&mut prg)).collect()
     }
+}
+
+fn classical_prime<F: PrimeField>(
+    t: &mut ClassicalTranscript,
+    label: &'static [u8],
+    count: usize,
+    kind: &[u8],
+) -> Vec<F> {
+    t.append_bytes(b"typed request kind", kind);
+    t.challenge_prime(label, count)
+}
+fn classical_extension<Base: PrimeField, F: AbstractExtensionField<Base>>(
+    t: &mut ClassicalTranscript,
+    label: &'static [u8],
+    count: usize,
+    kind: &[u8],
+) -> Vec<F> {
+    t.append_bytes(b"typed request kind", kind);
+    t.challenge_extension::<Base, F>(label, count)
+        .expect("trusted extension challenge dimensions")
 }
 
 impl<F: Field> Default for Transcript<F> {
@@ -219,13 +541,13 @@ fn extension_values<Base: PrimeField, EF: AbstractExtensionField<Base>>(
         .collect()
 }
 
-struct CanonicalSampler {
+pub(crate) struct CanonicalSampler {
     p: u128,
     mask: u128,
     bytes: usize,
 }
 impl CanonicalSampler {
-    fn new(p: u128) -> Self {
+    pub(crate) fn new(p: u128) -> Self {
         assert!(p > 1, "field characteristic must exceed one");
         let bits = u128::BITS - (p - 1).leading_zeros();
         Self {
@@ -238,7 +560,7 @@ impl CanonicalSampler {
             bytes: bits.div_ceil(8) as usize,
         }
     }
-    fn sample(&self, read: &mut impl FnMut(&mut [u8])) -> u128 {
+    pub(crate) fn sample(&self, read: &mut impl FnMut(&mut [u8])) -> u128 {
         loop {
             let mut bytes = [0u8; 16];
             read(&mut bytes[..self.bytes]);
@@ -273,8 +595,248 @@ impl DirectReader<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn atomic_column_schedule_is_opt_in_and_inherited() {
+        let mut parent = Transcript::<BabyBear>::new_classical_atomic_columns(&[76; 64]);
+        assert!(parent.uses_atomic_brakedown_columns());
+        assert!(parent.uses_atomic_zerocheck());
+        assert!(
+            !Transcript::<BabyBear>::new_classical_atomic_zerocheck(&[76; 64])
+                .uses_atomic_brakedown_columns()
+        );
+        let mut child = parent
+            .fork_classical_extension::<BabyBear, algebra::BabyBearExtension6>(
+                b"columns", b"context",
+            )
+            .unwrap();
+        assert!(child.uses_atomic_brakedown_columns());
+        parent.finish_classical_child(&mut child).unwrap();
+        assert!(
+            parent
+                .with_classical_extension_child::<BabyBear, algebra::BabyBearExtension6, _>(
+                    b"scoped columns",
+                    b"context",
+                    |child| child.uses_atomic_brakedown_columns() && child.uses_atomic_zerocheck()
+                )
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn atomic_zerocheck_schedule_is_inherited_and_keeps_v3_separate() {
+        let mut parent = Transcript::<BabyBear>::new_classical_atomic_zerocheck(&[75; 64]);
+        assert!(parent.uses_atomic_ntt_rows());
+        assert!(parent.uses_atomic_joint_projections());
+        assert!(parent.uses_atomic_zerocheck());
+        assert!(
+            !Transcript::<BabyBear>::new_classical_atomic_phases(&[75; 64]).uses_atomic_zerocheck()
+        );
+        let mut child = parent
+            .fork_classical_extension::<BabyBear, algebra::BabyBearExtension6>(
+                b"zero child",
+                b"context",
+            )
+            .unwrap();
+        assert!(child.uses_atomic_zerocheck());
+        parent.finish_classical_child(&mut child).unwrap();
+    }
+    #[test]
+    fn atomic_phase_schedule_is_inherited_without_changing_old_flags() {
+        let mut parent = Transcript::<BabyBear>::new_classical_atomic_phases(&[74; 64]);
+        assert!(parent.uses_atomic_ntt_rows());
+        assert!(parent.uses_atomic_joint_projections());
+        assert!(
+            !Transcript::<BabyBear>::new_classical_atomic_ntt(&[74; 64])
+                .uses_atomic_joint_projections()
+        );
+        assert!(!Transcript::<BabyBear>::new_classical(&[74; 64]).uses_atomic_joint_projections());
+        let mut child = parent
+            .fork_classical_extension::<BabyBear, algebra::BabyBearExtension6>(
+                b"phase child",
+                b"context",
+            )
+            .unwrap();
+        assert!(child.uses_atomic_ntt_rows());
+        assert!(child.uses_atomic_joint_projections());
+        parent.finish_classical_child(&mut child).unwrap();
+    }
+    #[test]
+    fn atomic_ntt_schedule_is_explicit_and_inherited() {
+        use crate::Transcript;
+        use algebra::{BabyBear, BabyBearExtension6};
+        let mut parent = Transcript::<BabyBear>::new_classical_atomic_ntt(&[73; 64]);
+        assert!(parent.uses_atomic_ntt_rows());
+        assert!(!Transcript::<BabyBear>::new_classical(&[73; 64]).uses_atomic_ntt_rows());
+        let mut child = parent
+            .fork_classical_extension::<BabyBear, BabyBearExtension6>(b"atomic child", b"context")
+            .unwrap();
+        assert!(child.uses_atomic_ntt_rows());
+        parent.finish_classical_child(&mut child).unwrap();
+    }
     use super::*;
     use algebra::{BabyBear, Goldilocks};
+
+    #[test]
+    fn linked_children_reject_wrong_advanced_and_spent_parents() {
+        type E = algebra::BabyBearExtension6;
+        let mut parent = Transcript::<BabyBear>::new_classical(&[1; 64]);
+        let mut child = parent
+            .fork_classical_extension::<BabyBear, E>(b"child", b"context")
+            .unwrap();
+        let mut wrong = Transcript::<BabyBear>::new_classical(&[2; 64]);
+        assert!(wrong.finish_classical_child(&mut child).is_err());
+        child.get_challenge(b"point");
+        parent.finish_classical_child(&mut child).unwrap();
+        assert!(parent.finish_classical_child(&mut child).is_err());
+        let mut parent = Transcript::<BabyBear>::new_classical(&[1; 64]);
+        let mut child = parent
+            .fork_classical_extension::<BabyBear, E>(b"child", b"context")
+            .unwrap();
+        parent.append_message(b"unexpected parent progress", &1u64);
+        assert!(parent.finish_classical_child(&mut child).is_err());
+    }
+
+    #[test]
+    fn index_phase_preserves_legacy_requests_and_uses_classical_block() {
+        let mut actual = Transcript::<BabyBear>::new_direct();
+        let mut reference = Transcript::<BabyBear>::new_direct();
+        let got = actual.get_index_challenges(b"indices", 32, 17).unwrap();
+        let expected: Vec<_> = (0..17)
+            .map(|_| {
+                let mut bytes = [0; 8];
+                reference.get_challenge_bytes(b"indices", &mut bytes);
+                (u64::from_le_bytes(bytes) & 31) as usize
+            })
+            .collect();
+        assert_eq!(got, expected);
+        let mut a = [0; 64];
+        let mut b = [0; 64];
+        actual.get_challenge_bytes(b"after", &mut a);
+        reference.get_challenge_bytes(b"after", &mut b);
+        assert_eq!(a, b);
+        let profile = [2; 64];
+        let mut actual = Transcript::<BabyBear>::new_classical(&profile);
+        let mut reference =
+            ClassicalTranscript::new(b"HasteBoots typed classical prime v1", &profile);
+        let p: u128 = BabyBear::MODULUS_VALUE.as_into();
+        reference.append_bytes(b"typed prime field", &p.to_le_bytes());
+        assert!(actual.get_index_challenges(b"indices", 3, 17).is_err());
+        assert_eq!(
+            actual.get_index_challenges(b"indices", 32, 17).unwrap(),
+            reference.challenge_indices(b"indices", 32, 17).unwrap()
+        );
+        actual.get_challenge_bytes(b"after", &mut a);
+        reference.challenge_bytes(b"after", &mut b);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn classical_typed_child_matches_byte_link_and_legacy_rejects_unchanged() {
+        type E = algebra::BabyBearExtension6;
+        let profile = [8; 64];
+        let mut typed = Transcript::<BabyBear>::new_classical(&profile);
+        let mut bytes = ClassicalTranscript::new(b"HasteBoots typed classical prime v1", &profile);
+        let p: u128 = BabyBear::MODULUS_VALUE.as_into();
+        bytes.append_bytes(b"typed prime field", &p.to_le_bytes());
+        let got = typed
+            .with_classical_extension_child::<BabyBear, E, _>(b"lookup", b"root/context", |child| {
+                child.append_message(b"message", &42u64);
+                child.get_vec_challenge(b"points", 4)
+            })
+            .unwrap();
+        let expected = bytes.with_child(b"lookup", b"root/context", |child| {
+            child
+                .challenge_extension::<BabyBear, E>(b"typed extension identity", 0)
+                .unwrap();
+            child.append_message(b"message", &42u64).unwrap();
+            child.append_bytes(b"typed request kind", b"vector");
+            child
+                .challenge_extension::<BabyBear, E>(b"points", 4)
+                .unwrap()
+        });
+        assert_eq!(got, expected);
+        let mut a = [0; 64];
+        let mut b = [0; 64];
+        typed.get_challenge_bytes(b"after", &mut a);
+        bytes.challenge_bytes(b"after", &mut b);
+        assert_eq!(a, b);
+        let mut legacy = Transcript::<BabyBear>::new_direct();
+        let mut reference = Transcript::<BabyBear>::new_direct();
+        assert!(
+            legacy
+                .with_classical_extension_child::<BabyBear, E, _>(
+                    b"lookup",
+                    b"context",
+                    |_| panic!("must not run")
+                )
+                .is_err()
+        );
+        legacy.get_challenge_bytes(b"after", &mut a);
+        reference.get_challenge_bytes(b"after", &mut b);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn classical_typed_prime_dispatch_matches_byte_protocol() {
+        let profile = [3; 64];
+        let mut actual = Transcript::<BabyBear>::new_classical(&profile);
+        let mut expected =
+            ClassicalTranscript::new(b"HasteBoots typed classical prime v1", &profile);
+        let p: u128 = BabyBear::MODULUS_VALUE.as_into();
+        expected.append_bytes(b"typed prime field", &p.to_le_bytes());
+        actual.append_message(b"statement", &17u64);
+        expected.append_message(b"statement", &17u64).unwrap();
+        expected.append_bytes(b"typed request kind", b"scalar");
+        assert_eq!(
+            actual.get_challenge(b"point"),
+            expected.challenge_prime::<BabyBear>(b"point", 1)[0]
+        );
+        for count in [0, 1, 17] {
+            expected.append_bytes(b"typed request kind", b"vector");
+            assert_eq!(
+                actual.get_vec_challenge(b"points", count),
+                expected.challenge_prime::<BabyBear>(b"points", count)
+            );
+        }
+        let mut a = [0; 64];
+        let mut b = [0; 64];
+        actual.get_challenge_bytes(b"after", &mut a);
+        expected.challenge_bytes(b"after", &mut b);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn classical_typed_extension_dispatch_matches_byte_protocol() {
+        type E = algebra::GoldilocksExtension3;
+        let profile = [5; 64];
+        let mut actual = Transcript::<E>::new_classical_extension::<Goldilocks>(&profile);
+        let mut expected =
+            ClassicalTranscript::new(b"HasteBoots typed classical extension v1", &profile);
+        expected
+            .challenge_extension::<Goldilocks, E>(b"typed extension identity", 0)
+            .unwrap();
+        for count in [0, 1, 17] {
+            expected.append_bytes(b"typed request kind", b"vector");
+            assert_eq!(
+                actual.get_vec_challenge(b"points", count),
+                expected
+                    .challenge_extension::<Goldilocks, E>(b"points", count)
+                    .unwrap()
+            );
+        }
+        expected.append_bytes(b"typed request kind", b"scalar");
+        assert_eq!(
+            actual.get_challenge(b"point"),
+            expected
+                .challenge_extension::<Goldilocks, E>(b"point", 1)
+                .unwrap()[0]
+        );
+        let mut a = [0; 64];
+        let mut b = [0; 64];
+        actual.get_challenge_bytes(b"after", &mut a);
+        expected.challenge_bytes(b"after", &mut b);
+        assert_eq!(a, b);
+    }
 
     fn legacy_reference<F: Field>() {
         let mut actual = Transcript::<F>::default();
@@ -321,6 +883,20 @@ mod tests {
             assert_eq!(count, 3);
         }
         assert_eq!(CanonicalSampler::new(2).sample(&mut |out| out.fill(255)), 1);
+    }
+    #[test]
+    fn canonical_sampler_continues_beyond_analytical_candidate_threshold() {
+        for p in [3u128, 2013265921, 18446744069414584321, u128::MAX] {
+            let sampler = CanonicalSampler::new(p);
+            let mut candidates = 0usize;
+            let value = sampler.sample(&mut |out| {
+                candidates += 1;
+                let candidate = if candidates <= 513 { p } else { 0 };
+                out.copy_from_slice(&candidate.to_le_bytes()[..out.len()]);
+            });
+            assert_eq!(value, 0);
+            assert_eq!(candidates, 514);
+        }
     }
     #[test]
     fn stream_reads_preserve_bytes_across_every_buffer_boundary() {

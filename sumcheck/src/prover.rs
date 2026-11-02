@@ -21,6 +21,14 @@ pub struct ProverMsg<F: Field> {
     pub(crate) evaluations: Vec<F>,
 }
 
+impl<F: Field> ProverMsg<F> {
+    /// Construct a round message from evaluations at consecutive field points
+    /// 0, 1, ... . Verification checks its length against the trusted degree.
+    pub fn from_evaluations(evaluations: Vec<F>) -> Self {
+        Self { evaluations }
+    }
+}
+
 /// Prover State
 pub struct ProverState<F: Field> {
     /// sampled randomness given by the verifier

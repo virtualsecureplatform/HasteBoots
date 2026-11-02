@@ -240,15 +240,16 @@ where
             .map(|(i, t)| (t, i))
             .collect();
         let mut counts = vec![F::zero(); request.config.table().len()];
-        let mut rows = Vec::new();
+        let mut rows = Vec::with_capacity(request.config.logical_len());
+        // Reuse one tuple buffer: Vec and its borrowed slice use the same hash
+        // and equality, preserving the public table's exact index and order.
+        let mut tuple = vec![F::zero(); request.source_slots.len()];
         for row in 0..request.config.logical_len() {
-            let tuple: Vec<_> = request
-                .source_slots
-                .iter()
-                .map(|&i| witness[i].values()[row])
-                .collect();
+            for (value, &slot) in tuple.iter_mut().zip(&request.source_slots) {
+                *value = witness[slot].values()[row];
+            }
             let at = *index
-                .get(&tuple)
+                .get(tuple.as_slice())
                 .ok_or_else(|| error("shared lookup tuple outside public table"))?;
             counts[at] += F::one();
             rows.push(at);
@@ -271,7 +272,7 @@ where
     drop(indices);
     let helper_tables: Vec<_> = helpers
         .iter()
-        .map(|h| bridge::table::<F, EF>(n, k, &h.evaluations).map_err(convert))
+        .map(|h| bridge::table::<F, EF>(n, helper.width(), &h.evaluations).map_err(convert))
         .collect::<Result<_, _>>()?;
     statistics.preparation += timer.elapsed();
     let timer = std::time::Instant::now();
@@ -392,10 +393,11 @@ where
     finish_child(parent, &mut child);
     statistics.terminal_evaluation += timer.elapsed();
     let timer = std::time::Instant::now();
-    let helper_query = bridge::coefficients_query::<F, EF>(k, point).map_err(convert)?;
+    let helper_query =
+        bridge::coefficients_query::<F, EF>(helper.width(), point).map_err(convert)?;
     let helper_claims: Vec<_> = helper_values
         .iter()
-        .map(|&v| bridge::vector::<F, EF>(k, v).map_err(convert))
+        .map(|&v| bridge::vector::<F, EF>(helper.width(), v).map_err(convert))
         .collect::<Result<_, _>>()?;
     let helper_openings = committed
         .iter()
@@ -544,11 +546,12 @@ where
         &(&proof.source_values, &proof.helper_values),
     );
     finish_child(parent, &mut child);
-    let helper_query = bridge::coefficients_query::<F, EF>(k, point).map_err(convert)?;
+    let helper_query =
+        bridge::coefficients_query::<F, EF>(helper.width(), point).map_err(convert)?;
     let helper_claims: Vec<_> = proof
         .helper_values
         .iter()
-        .map(|&v| bridge::vector::<F, EF>(k, v).map_err(convert))
+        .map(|&v| bridge::vector::<F, EF>(helper.width(), v).map_err(convert))
         .collect::<Result<_, _>>()?;
     for ((root, value), opening) in proof
         .helper_roots

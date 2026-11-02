@@ -49,8 +49,7 @@ fn reduce<F: PrimeField + Serialize>(
     first: &[Vec<Vec<F>>],
 ) -> Result<(MatrixPair<F>, Vec<F>, Vec<Vec<F>>), Error> {
     trans.append_message(b"packed batch zero first messages", &first);
-    let mixing = trans.get_vec_challenge(b"packed batch zero mixing matrix", width * width);
-    let r = trans.get_vec_challenge(b"packed batch zero first challenge", width);
+    let (mixing, r) = first_challenges(trans, width, true);
     let pair = packed::challenge_pair(&r).map_err(shape_error)?;
     let claims = first
         .iter()

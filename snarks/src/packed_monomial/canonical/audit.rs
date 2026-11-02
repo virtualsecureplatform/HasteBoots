@@ -1,5 +1,74 @@
 //! Test-only foreign public factors, with strict source authentication.
 use super::*;
+#[cfg(feature = "transcript-audit")]
+pub(crate) fn product_subclaim<F, H, P>(
+    trans: &mut Transcript<F>,
+    plan: &Plan,
+    evaluation_parameters: &P,
+    coefficients: &[CanonicalVerifierOracle<'_, H::Output, P>],
+    proof: &Proof<F, H::Output, P::BatchProof, P::SingleProof>,
+) -> Result<
+    (
+        sumcheck::packed_zero::ZeroSubclaim<F>,
+        Vec<packed_ntt::AuditSourceObligations<F>>,
+    ),
+    Error,
+>
+where
+    F: NTTField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    bind::<F, H, P>(trans, plan, evaluation_parameters, coefficients)?;
+    if proof.evaluations.len() != 2 || proof.ntt.len() != 2 {
+        return Err(error("monomial audit source count"));
+    }
+    trans.append_message(b"public canonical monomial NTT roots", &proof.evaluations);
+    let shape =
+        packed_ntt::Shape::new_canonical::<F, H, P>(evaluation_parameters, plan.polynomial_size)
+            .map_err(convert)?;
+    let mut obligations = Vec::new();
+    for i in 0..2 {
+        let evaluation = CanonicalVerifierOracle {
+            parameters: evaluation_parameters,
+            commitment: &proof.evaluations[i],
+        };
+        obligations.push(
+            packed_ntt::audit_verified_source_obligations::<F, H, P>(
+                trans,
+                &shape,
+                &coefficients[i],
+                &evaluation,
+                &proof.ntt[i],
+            )
+            .map_err(convert)?,
+        );
+    }
+    let subclaim = packed_zero::verify(
+        trans,
+        &product_shape(
+            evaluation_parameters.num_vars(),
+            evaluation_parameters.width(),
+        ),
+        &proof.product,
+    )
+    .map_err(convert)?;
+    Ok((subclaim, obligations))
+}
+pub(crate) fn bind_for_test<F, H, P>(
+    trans: &mut Transcript<F>,
+    plan: &Plan,
+    evaluation_parameters: &P,
+    coefficients: &[CanonicalVerifierOracle<'_, H::Output, P>],
+) -> Result<(), Error>
+where
+    F: NTTField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    bind::<F, H, P>(trans, plan, evaluation_parameters, coefficients)
+}
+
 pub(crate) fn prove_foreign<F, H, P, R>(
     trans: &mut Transcript<F>,
     plan: &Plan,
@@ -92,6 +161,11 @@ where
         openings,
     })
 }
+pub(crate) struct Queries<F> {
+    pub(crate) product: sumcheck::packed_zero::ZeroSubclaim<F>,
+    #[cfg(feature = "transcript-audit")]
+    pub(crate) ntt: Vec<packed_ntt::AuditSourceObligations<F>>,
+}
 pub(crate) fn verify<F, H, P>(
     trans: &mut Transcript<F>,
     plan: &Plan,
@@ -99,6 +173,21 @@ pub(crate) fn verify<F, H, P>(
     coefficients: &[CanonicalVerifierOracle<'_, H::Output, P>],
     proof: &Proof<F, H::Output, P::BatchProof, P::SingleProof>,
 ) -> Result<bool, Error>
+where
+    F: NTTField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    verify_queries::<F, H, P>(trans, plan, evaluation_parameters, coefficients, proof)
+        .map(|result| result.0)
+}
+pub(crate) fn verify_queries<F, H, P>(
+    trans: &mut Transcript<F>,
+    plan: &Plan,
+    evaluation_parameters: &P,
+    coefficients: &[CanonicalVerifierOracle<'_, H::Output, P>],
+    proof: &Proof<F, H::Output, P::BatchProof, P::SingleProof>,
+) -> Result<(bool, Queries<F>), Error>
 where
     F: NTTField + Serialize,
     H: Hash + Send + Sync,
@@ -133,7 +222,21 @@ where
     let ntt_shape =
         packed_ntt::Shape::new_canonical::<F, H, P>(evaluation_parameters, plan.polynomial_size)
             .map_err(convert)?;
+    #[cfg(feature = "transcript-audit")]
+    let mut ntt = Vec::new();
     for i in 0..2 {
+        #[cfg(feature = "transcript-audit")]
+        ntt.push(
+            packed_ntt::audit_verified_source_obligations::<F, H, P>(
+                trans,
+                &ntt_shape,
+                &coefficients[i],
+                &oracles[i],
+                &proof.ntt[i],
+            )
+            .map_err(convert)?,
+        );
+        #[cfg(not(feature = "transcript-audit"))]
         packed_ntt::verify_canonical::<F, H, P>(
             trans,
             &ntt_shape,
@@ -171,5 +274,12 @@ where
             )
             .map_err(convert)?;
     }
-    Ok(valid)
+    Ok((
+        valid,
+        Queries {
+            product: subclaim,
+            #[cfg(feature = "transcript-audit")]
+            ntt,
+        },
+    ))
 }

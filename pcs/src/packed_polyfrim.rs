@@ -9,7 +9,7 @@
 pub mod authenticated;
 
 use algebra::{
-    Field,
+    AbstractExtensionField, Field,
     matrix_weighted::{MatrixPair, PackedTable, ShapeError},
 };
 
@@ -101,6 +101,50 @@ impl<F: Field> Polynomial<F> {
         Ok(Self {
             width: self.width,
             coefficients,
+        })
+    }
+
+    // An arithmetic specialization, not a projection: use it only when every
+    // coefficient and matrix entry is actually embedded in Base. Other inputs
+    // retain the full extension arithmetic and the original fold equation.
+    fn fold_base<Base: Field>(&self, pair: &MatrixPair<F>) -> Result<Self, ShapeError>
+    where
+        F: AbstractExtensionField<Base>,
+    {
+        pair.validate(self.width)?;
+        if self.len() == 1 {
+            return Err(ShapeError("cannot fold constant polynomial"));
+        }
+        let extract = |values: &[F]| -> Option<Vec<Base>> {
+            values
+                .iter()
+                .map(|v| {
+                    let base = v.as_base_slice().first().copied()?;
+                    (F::from_base(base) == *v).then_some(base)
+                })
+                .collect()
+        };
+        let Some(zero) = extract(pair.zero.values()) else {
+            return self.fold(pair);
+        };
+        let Some(one) = extract(pair.one.values()) else {
+            return self.fold(pair);
+        };
+        let Some(coefficients) = extract(&self.coefficients) else {
+            return self.fold(pair);
+        };
+        let base = Polynomial::<Base> {
+            width: self.width,
+            coefficients,
+        };
+        let query = MatrixPair {
+            zero: algebra::matrix_weighted::Matrix::new(self.width, zero)?,
+            one: algebra::matrix_weighted::Matrix::new(self.width, one)?,
+        };
+        let folded = base.fold(&query)?;
+        Ok(Self {
+            width: self.width,
+            coefficients: folded.coefficients.into_iter().map(F::from_base).collect(),
         })
     }
 }

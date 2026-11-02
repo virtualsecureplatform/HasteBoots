@@ -21,7 +21,7 @@ impl<P> Parameters<'_, P> {
     {
         let width = self.source.width();
         let dims = cfg.variables(width)?;
-        for (pp, n) in [
+        for (role, (pp, n)) in [
             self.source,
             self.helper,
             self.final_source,
@@ -29,8 +29,14 @@ impl<P> Parameters<'_, P> {
         ]
         .into_iter()
         .zip(dims)
+        .enumerate()
         {
-            if pp.width() != width || pp.num_vars() != n {
+            let valid_width = if role % 2 == 0 {
+                pp.width() == width
+            } else {
+                pp.width() > 0 && pp.width() <= width
+            };
+            if !valid_width || pp.num_vars() != n {
                 return Err(error("incompatible trusted PCS geometry"));
             }
             pp.context().map_err(convert)?;

@@ -43,6 +43,19 @@ where
     H: Hash + Send + Sync,
     P: CanonicalPcs<F, H>,
 {
+    verify_queries::<F, H, P>(trans, sources, relations, proof).map(|result| result.0)
+}
+pub(crate) fn verify_queries<F, H, P>(
+    trans: &mut Transcript<F>,
+    sources: &[CanonicalVerifierOracle<'_, H::Output, P>],
+    relations: &[Relation<F>],
+    proof: &CanonicalProof<F, P::SingleProof>,
+) -> Result<(Vec<bool>, Vec<Vec<MatrixPair<F>>>), Error>
+where
+    F: PrimeField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
     let query = query::<F, H, P>(trans, sources, relations)?;
     if proof.openings.len() != sources.len() || proof.values.len() != sources.len() {
         return Err(error("incorrect source proof count"));
@@ -61,15 +74,17 @@ where
             .is_ok()
         })
         .collect();
+    let mut queries = Vec::with_capacity(sources.len());
     for ((source, value), opening) in sources.iter().zip(&proof.values).zip(&proof.openings) {
         let (query, value) = source
             .parameters
             .normalize_claim(query.clone(), value.clone())
             .map_err(convert)?;
+        queries.push(query.clone());
         source
             .parameters
             .verify(trans, source.commitment, &query, &value, opening)
             .map_err(convert)?;
     }
-    Ok(valid)
+    Ok((valid, queries))
 }

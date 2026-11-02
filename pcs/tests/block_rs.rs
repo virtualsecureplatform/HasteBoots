@@ -1,4 +1,4 @@
-use algebra::{BabyBear, Goldilocks, NTTField, transformation::AbstractNTT};
+use algebra::{BabyBear, Field, Goldilocks, NTTField, transformation::AbstractNTT};
 use pcs::utils::code::{BlockReedSolomonCode, RowCode};
 
 fn check<F: NTTField>() {
@@ -86,4 +86,65 @@ fn block_rs_rejects_invalid_or_unsupported_dimensions() {
         assert!(BlockReedSolomonCode::<BabyBear>::new(n, k, blowup).is_err());
     }
     assert!(BlockReedSolomonCode::<BabyBear>::new(1usize << 27, 1, 2).is_err());
+}
+
+// Retain the pre-shortcut NTT path as a wire-level reference. Equality of field
+// elements alone does not detect Goldilocks lazy-representation differences.
+fn legacy_encode<F: NTTField>(code: &BlockReedSolomonCode<F>, input: &[F]) -> Vec<F> {
+    let n = code.codeword_blocks();
+    let k = code.block_width();
+    let table = F::get_ntt_table(n.ilog2()).unwrap();
+    let mut encoded = vec![F::zero(); n * k];
+    for lane in 0..k {
+        let mut coordinate = vec![F::zero(); n];
+        for (block, chunk) in input.chunks(k).enumerate() {
+            if let Some(&value) = chunk.get(lane) {
+                coordinate[block] = value;
+            }
+        }
+        table.transform_slice(&mut coordinate);
+        for (symbol, value) in encoded.chunks_exact_mut(k).zip(coordinate) {
+            symbol[lane] = value;
+        }
+    }
+    encoded
+}
+fn check_zero_rows<F: NTTField + serde::Serialize>() {
+    for (len, width, blowup) in [(1, 1, 2), (64, 4, 2), (4096, 8, 2), (2048, 1, 4)] {
+        let code = BlockReedSolomonCode::<F>::new(len, width, blowup).unwrap();
+        for input in [
+            vec![F::zero(); len],
+            (0..len)
+                .map(|i| {
+                    if i % 3 == 0 {
+                        F::zero()
+                    } else {
+                        F::from(i + 1)
+                    }
+                })
+                .collect(),
+        ] {
+            let mut encoded = vec![F::one(); code.codeword_blocks() * width];
+            code.encode_row(&input, &mut encoded);
+            let expected = legacy_encode(&code, &input);
+            assert_eq!(
+                bincode::serde::encode_to_vec(&encoded, bincode::config::standard()).unwrap(),
+                bincode::serde::encode_to_vec(&expected, bincode::config::standard()).unwrap(),
+            );
+        }
+    }
+}
+#[test]
+fn zero_rows_preserve_legacy_ntt_wire_values() {
+    check_zero_rows::<BabyBear>();
+    check_zero_rows::<Goldilocks>();
+    let code = BlockReedSolomonCode::<Goldilocks>::new(64, 4, 2).unwrap();
+    let input = vec![Goldilocks::new(Goldilocks::MODULUS_VALUE); 64];
+    let mut encoded = vec![Goldilocks::from(1usize); code.codeword_blocks() * 4];
+    code.encode_row(&input, &mut encoded);
+    assert_eq!(
+        bincode::serde::encode_to_vec(&encoded, bincode::config::standard()).unwrap(),
+        bincode::serde::encode_to_vec(legacy_encode(&code, &input), bincode::config::standard())
+            .unwrap(),
+    );
 }

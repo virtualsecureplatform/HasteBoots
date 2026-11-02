@@ -156,6 +156,106 @@ where
         .expect("consistent scalar PCS prover state")
         .1
     }
+
+    /// Checked base-source opening returning the exact authenticated value.
+    /// This supports enclosing reductions without recomputing a scalar MLE.
+    pub fn try_open_at(
+        pp: &Parameters<EF>,
+        commitment: &core::Commitment<H::Output>,
+        state: &core::State<EF, H>,
+        point: &[EF],
+        trans: &mut Transcript<EF>,
+    ) -> Result<(EF, core::Proof<EF, H::Output>), Error> {
+        let physical = Self::point(pp, point).ok_or(Error("scalar point dimensions"))?;
+        let inner = pp
+            .inner
+            .as_ref()
+            .ok_or(Error("uninitialized scalar parameters"))?;
+        if commitment.root != state.commitment().root {
+            return Err(Error("scalar source root"));
+        }
+        trans.append_message(
+            b"ordinary PipFRI PCS adapter v1",
+            &(pp.logical_vars, b"base table".as_slice()),
+        );
+        core::open_at(trans, inner, commitment, state, &physical)
+    }
+    /// Commit a base table into the unchanged scalar v2 packed-fragment root.
+    pub fn try_commit_virtual_base(
+        pp: &Parameters<EF>,
+        data: &[F],
+    ) -> Result<core::virtual_source::base::State<F, H>, Error> {
+        let inner = pp
+            .inner
+            .as_ref()
+            .ok_or(Error("uninitialized scalar parameters"))?;
+        if data.len() != 1usize << pp.logical_vars {
+            return Err(Error("virtual base table dimensions"));
+        }
+        if pp.logical_vars == 0 {
+            core::virtual_source::base::commit::<F, EF, H>(inner, &[data[0], data[0]])
+        } else {
+            core::virtual_source::base::commit::<F, EF, H>(inner, data)
+        }
+    }
+    /// Open the base-storage representation with unchanged scalar v2 framing.
+    pub fn try_open_virtual_base_at(
+        pp: &Parameters<EF>,
+        commitment: &core::Commitment<H::Output>,
+        state: &core::virtual_source::base::State<F, H>,
+        point: &[EF],
+        trans: &mut Transcript<EF>,
+    ) -> Result<(EF, core::virtual_source::Proof<EF, H::Output>), Error> {
+        let physical = Self::point(pp, point).ok_or(Error("virtual scalar point dimensions"))?;
+        let inner = pp
+            .inner
+            .as_ref()
+            .ok_or(Error("uninitialized scalar parameters"))?;
+        if commitment.root != state.commitment().root {
+            return Err(Error("virtual scalar source root"));
+        }
+        trans.append_message(b"unmasked virtual PipFRI PCS v2", &pp.logical_vars);
+        core::virtual_source::base::open_at::<F, EF, H>(trans, inner, commitment, state, &physical)
+    }
+    /// Checked unmasked v2 opening, with virtual initial-word authentication.
+    pub fn try_open_virtual_at(
+        pp: &Parameters<EF>,
+        commitment: &core::Commitment<H::Output>,
+        state: &core::State<EF, H>,
+        point: &[EF],
+        trans: &mut Transcript<EF>,
+    ) -> Result<(EF, core::virtual_source::Proof<EF, H::Output>), Error> {
+        let physical = Self::point(pp, point).ok_or(Error("virtual scalar point dimensions"))?;
+        let inner = pp
+            .inner
+            .as_ref()
+            .ok_or(Error("uninitialized scalar parameters"))?;
+        if commitment.root != state.commitment().root {
+            return Err(Error("virtual scalar source root"));
+        }
+        trans.append_message(b"unmasked virtual PipFRI PCS v2", &pp.logical_vars);
+        core::virtual_source::open_at(trans, inner, commitment, state, &physical)
+    }
+    /// Verify the explicitly versioned virtual opening of a base source table.
+    pub fn verify_virtual(
+        pp: &Parameters<EF>,
+        commitment: &core::Commitment<H::Output>,
+        point: &[EF],
+        value: EF,
+        proof: &core::virtual_source::Proof<EF, H::Output>,
+        trans: &mut Transcript<EF>,
+    ) -> Result<(), Error> {
+        let physical = Self::point(pp, point).ok_or(Error("virtual scalar point dimensions"))?;
+        trans.append_message(b"unmasked virtual PipFRI PCS v2", &pp.logical_vars);
+        core::virtual_source::verify::<EF, H>(
+            trans,
+            pp.inner.as_ref().unwrap(),
+            commitment,
+            &physical,
+            value,
+            proof,
+        )
+    }
     fn verify_one(
         pp: &Parameters<EF>,
         commitment: &core::Commitment<H::Output>,

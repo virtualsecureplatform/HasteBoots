@@ -179,6 +179,31 @@ where
     H: Hash + Send + Sync,
     P: CanonicalPcs<F, H>,
 {
+    verify_queries::<F, EF, H, P>(trans, config, source, borrow, helper, digits, proof)
+        .map(|result| result.0)
+}
+pub(crate) fn verify_queries<F, EF, H, P>(
+    trans: &mut Transcript<F>,
+    config: &Config,
+    source: &CanonicalVerifierOracle<'_, H::Output, P>,
+    borrow: &P,
+    helper: &P,
+    digits: &[CanonicalVerifierOracle<'_, H::Output, P>],
+    proof: &Proof<F, EF, H::Output, P::SingleProof, P::BatchProof>,
+) -> Result<
+    (
+        ([bool; 3], bool),
+        Vec<Vec<algebra::matrix_weighted::MatrixPair<F>>>,
+        Option<crate::packed_extension_lookup::canonical::shared::audit::SourceClaims<F>>,
+    ),
+    Error,
+>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
     bind::<F, EF, H, P>(trans, config, source, borrow, helper, digits)?;
     let d = config.num_digits::<F>()?;
     if proof.borrow_commitments.len() != d + 1 || proof.comparisons.len() != d {
@@ -203,7 +228,7 @@ where
             commitment: s.commitment,
         });
     }
-    let valid = packed_linear::audit::verify::<F, H, P>(
+    let (valid, queries) = packed_linear::audit::verify_queries::<F, H, P>(
         trans,
         &linear_sources,
         &relations::<F>(config)?,
@@ -234,9 +259,13 @@ where
         .map_err(convert)?;
     }
     Ok((
-        valid
-            .try_into()
-            .map_err(|_| error("audit linear identity count"))?,
-        lookup_valid,
+        (
+            valid
+                .try_into()
+                .map_err(|_| error("audit linear identity count"))?,
+            lookup_valid,
+        ),
+        queries,
+        None,
     ))
 }

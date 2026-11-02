@@ -116,6 +116,14 @@ where
         }
         p.context().map_err(convert)?;
     }
+    // Source packing stays power-of-two. Helpers may remove only the unused
+    // basis padding, and their trusted contexts bind their actual width.
+    for (helper, vars) in [(pp.helper, dims[1]), (pp.final_stage.helper, dims[3])] {
+        if (helper.width() != width && helper.width() != EF::D) || helper.num_vars() != vars {
+            return Err(error("incompatible trusted helper geometry"));
+        }
+        helper.context().map_err(convert)?;
+    }
     let d = setup
         .config
         .decomposition::<F>()?
@@ -332,7 +340,7 @@ where
     P: CanonicalPcs<F, H>,
     R: Rng + CryptoRng,
 {
-    prove_inner::<F, EF, H, P, R, stages::PerLimb>(pp, setup, s, trace, rng, stats)
+    prove_inner::<F, EF, H, P, R, stages::PerLimb>(pp, setup, s, trace, rng, stats, None)
 }
 fn prove_inner<F, EF, H, P, R, D>(
     pp: &Parameters<'_, P>,
@@ -341,6 +349,7 @@ fn prove_inner<F, EF, H, P, R, D>(
     trace: &PBSTrace<F>,
     rng: &mut R,
     stats: &mut ProverStatistics,
+    transcript: Option<Transcript<F>>,
 ) -> Result<
     BackendProof<F, H::Output, P::SingleProof, P::BatchProof, D::Decomposition, D::KeySwitch>,
     Error,
@@ -410,7 +419,7 @@ where
     drop(ac_tables);
     let (decomposition_inputs, in_states) = commit::<F, H, P, R>(pp.inputs, &in_tables, rng)?;
     drop(in_tables);
-    let mut trans = Transcript::new_direct();
+    let mut trans = transcript.unwrap_or_else(Transcript::new_direct);
     bind_inner::<F, EF, H, P, D>(
         &mut trans,
         pp,
@@ -472,6 +481,7 @@ where
                 pp.borrows,
                 pp.helper,
                 &co[half * d..(half + 1) * d].iter().collect::<Vec<_>>(),
+                &mut stats.canonical_lookup,
                 rng,
             )
         })
@@ -553,7 +563,7 @@ where
     H: Hash + Send + Sync,
     P: CanonicalPcs<F, H>,
 {
-    verify_inner::<F, EF, H, P, stages::PerLimb>(pp, setup, s, proof)
+    verify_inner::<F, EF, H, P, stages::PerLimb>(pp, setup, s, proof, None)
 }
 fn verify_inner<F, EF, H, P, D>(
     pp: &Parameters<'_, P>,
@@ -567,6 +577,7 @@ fn verify_inner<F, EF, H, P, D>(
         D::Decomposition,
         D::KeySwitch,
     >,
+    transcript: Option<Transcript<F>>,
 ) -> Result<(), Error>
 where
     F: NTTField + Serialize,
@@ -591,7 +602,7 @@ where
     let normalized = statement::<F, H, P>(pp.coefficients, s);
     let s = normalized.borrowed();
     let (plan, initial) = public_inputs(cfg, &s)?;
-    let mut trans = Transcript::new_direct();
+    let mut trans = transcript.unwrap_or_else(Transcript::new_direct);
     bind_inner::<F, EF, H, P, D>(
         &mut trans,
         pp,
@@ -711,3 +722,5 @@ mod audit;
 
 /// Complete version-11 PBS with shared canonical comparisons.
 pub mod shared;
+/// Profile-bound SHA-512 / framed-SHAKE256 complete PBS version 12.
+pub mod classical;

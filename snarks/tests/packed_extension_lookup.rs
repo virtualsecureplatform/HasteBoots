@@ -243,3 +243,44 @@ fn babybear_degree8_query_mappings() {
 fn babybear_degree8_lookup() {
     roundtrip::<algebra::BabyBear, algebra::BabyBearExtension8>();
 }
+
+fn basis_padding<F, EF>(width: usize)
+where
+    F: NTTField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+{
+    let mut transcript = Transcript::<EF>::new_direct_extension::<F>();
+    for n in 0..=4 {
+        let values = transcript.get_vec_challenge(b"basis values", 1 << n);
+        let point = transcript.get_vec_challenge(b"basis point", n);
+        let basis = bridge::table::<F, EF>(n, EF::D, &values).unwrap();
+        let padded = bridge::table::<F, EF>(n, width, &values).unwrap();
+        let mut raw = padded.values().to_vec();
+        for row in 0..1 << n {
+            for lane in EF::D..width {
+                raw[row * width + lane] = F::from(row + lane + 9);
+            }
+        }
+        let padded = PackedTable::new(n, width, raw).unwrap();
+        let dense_query = bridge::coefficients_query::<F, EF>(EF::D, &point).unwrap();
+        let padded_query = bridge::coefficients_query::<F, EF>(width, &point).unwrap();
+        let dense = dense_query
+            .apply(&basis.evaluate(&dense_query.query).unwrap(), EF::D)
+            .unwrap();
+        let padded = padded_query
+            .apply(&padded.evaluate(&padded_query.query).unwrap(), width)
+            .unwrap();
+        let expected = DenseMultilinearExtension::from_evaluations_vec(n, values).evaluate(&point);
+        assert_eq!(bridge::element::<F, EF>(EF::D, &dense).unwrap(), expected);
+        assert_eq!(bridge::element::<F, EF>(width, &padded).unwrap(), expected);
+        assert_eq!(dense, padded[..EF::D]);
+    }
+}
+#[test]
+fn basis_projection_commutes_with_padding_babybear() {
+    basis_padding::<algebra::BabyBear, algebra::BabyBearExtension6>(8);
+}
+#[test]
+fn basis_projection_commutes_with_padding_goldilocks() {
+    basis_padding::<algebra::Goldilocks, algebra::GoldilocksExtension3>(4);
+}

@@ -137,16 +137,19 @@ where
     }
     finish_child(parent, &mut child);
     for (i, (group, a)) in proof.groups.iter().zip(&algebra).enumerate() {
-        let q0 = bridge::coefficients_query::<F, EF>(k, &a.sum_point).map_err(convert)?;
-        let q1 = bridge::coefficients_query::<F, EF>(k, &a.zero_point).map_err(convert)?;
+        let q0 =
+            bridge::coefficients_query::<F, EF>(helper.width(), &a.sum_point).map_err(convert)?;
+        let q1 =
+            bridge::coefficients_query::<F, EF>(helper.width(), &a.zero_point).map_err(convert)?;
         helper
             .verify_many(
                 parent,
                 &proof.reciprocal_commitments[i],
                 &[q0.query, q1.query],
                 &[
-                    bridge::vector::<F, EF>(k, a.sum_value).map_err(convert)?,
-                    bridge::vector::<F, EF>(k, group.reciprocal_value).map_err(convert)?,
+                    bridge::vector::<F, EF>(helper.width(), a.sum_value).map_err(convert)?,
+                    bridge::vector::<F, EF>(helper.width(), group.reciprocal_value)
+                        .map_err(convert)?,
                 ],
                 &group.reciprocal_opening,
             )

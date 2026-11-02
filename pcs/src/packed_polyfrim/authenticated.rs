@@ -13,6 +13,7 @@ use crate::{
 };
 use algebra::{AbstractExtensionField, Field, matrix_weighted::MatrixPair};
 use helper::{FiatShamirTranscript, Transcript};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
@@ -32,6 +33,13 @@ pub struct Parameters<F> {
     // Arithmetic choice only: canonical codewords and protocol parameters agree.
     #[serde(skip)]
     encoder: fn(&[F], usize, F) -> Vec<F>,
+    #[serde(skip)]
+    parallel_oracles: bool,
+    #[serde(skip)]
+    folder: fn(
+        &Polynomial<F>,
+        &MatrixPair<F>,
+    ) -> Result<Polynomial<F>, algebra::matrix_weighted::ShapeError>,
 }
 impl<F: Field + Serialize> Parameters<F> {
     /// Require power-of-two message >=2, blowup >=2, nonzero width/query count
@@ -61,6 +69,8 @@ impl<F: Field + Serialize> Parameters<F> {
             queries,
             root,
             encoder: rolling_fri::encode::<F>,
+            folder: Polynomial::<F>::fold,
+            parallel_oracles: false,
         })
     }
     /// Use coordinate-wise base FFTs on a base-field coset. This changes no
@@ -81,8 +91,30 @@ impl<F: Field + Serialize> Parameters<F> {
         self.encoder = rolling_fri::encode_extension::<Base, F>;
         Ok(self)
     }
+    /// Fold embedded base coefficients and matrix entries in Base arithmetic.
+    /// Non-base inputs use the original full-field fold. This changes no
+    /// parameter serialization, committed value, verifier equation or transcript.
+    pub fn with_base_field_folds<Base: Field>(mut self) -> Self
+    where
+        F: AbstractExtensionField<Base>,
+    {
+        self.folder = Polynomial::<F>::fold_base::<Base>;
+        self
+    }
+    /// Encode independent lanes and hash leaves in parallel on large oracles.
+    /// Additional lane buffers trade temporary memory for concurrency. Default
+    /// callers retain the original sequential schedule and identical wire data.
+    pub fn with_parallel_oracles(mut self) -> Self {
+        self.parallel_oracles = true;
+        self
+    }
     fn rounds(&self) -> usize {
         self.message.ilog2() as usize
+    }
+
+    /// Trusted rounds, lane width, encoded-domain logarithm and sample count.
+    pub(crate) fn proof_geometry(&self) -> (usize, usize, usize, usize) {
+        (self.rounds(), self.width, self.len(0).ilog2() as usize, self.queries)
     }
     fn len(&self, layer: usize) -> usize {
         self.message * self.blowup >> layer
@@ -166,11 +198,19 @@ fn state<F: Field + Serialize, H: Hash + Send + Sync>(
 ) -> State<F, H> {
     let values = encode_values(pp, layer, &polynomial);
     let mut tree = MerkleTree::<H>::new();
-    let leaves: Vec<_> = values
-        .chunks_exact(2 * pp.width)
-        .enumerate()
-        .map(|(i, v)| leaf::<F, H>(pp, layer, i, v))
-        .collect();
+    let leaves: Vec<_> = if pp.parallel_oracles && values.len() >= 1 << 15 {
+        values
+            .par_chunks_exact(2 * pp.width)
+            .enumerate()
+            .map(|(i, v)| leaf::<F, H>(pp, layer, i, v))
+            .collect()
+    } else {
+        values
+            .chunks_exact(2 * pp.width)
+            .enumerate()
+            .map(|(i, v)| leaf::<F, H>(pp, layer, i, v))
+            .collect()
+    };
     tree.generate(&leaves);
     State {
         polynomial,
@@ -183,6 +223,39 @@ fn state<F: Field + Serialize, H: Hash + Send + Sync>(
 }
 
 fn encode_values<F: Field + Serialize>(
+    pp: &Parameters<F>,
+    layer: usize,
+    polynomial: &Polynomial<F>,
+) -> Vec<F> {
+    let n = pp.len(layer);
+    if !pp.parallel_oracles || pp.width == 1 || n * pp.width < 1 << 15 {
+        return encode_values_sequential(pp, layer, polynomial);
+    }
+    // Each lane uses the identical independent FFT. The indexed collection and
+    // tiled transpose preserve lane order and avoid shared output writes.
+    let columns: Vec<Vec<F>> = (0..pp.width)
+        .into_par_iter()
+        .map(|lane| {
+            let coefficients: Vec<_> = polynomial
+                .coefficients
+                .chunks_exact(pp.width)
+                .map(|v| v[lane])
+                .collect();
+            (pp.encoder)(&coefficients, n, pp.shift(layer))
+        })
+        .collect();
+    let mut values = vec![F::zero(); n * pp.width];
+    values
+        .par_chunks_exact_mut(pp.width)
+        .enumerate()
+        .for_each(|(i, cell)| {
+            for (lane, value) in cell.iter_mut().enumerate() {
+                *value = columns[lane][i].canonicalized();
+            }
+        });
+    values
+}
+fn encode_values_sequential<F: Field + Serialize>(
     pp: &Parameters<F>,
     layer: usize,
     polynomial: &Polynomial<F>,
@@ -231,14 +304,11 @@ fn ladder<F: Field + Serialize, H: Hash + Send + Sync>(
         return Err(Error("source parameter context"));
     }
     let mut layers = Vec::new();
-    let mut polynomial = source
-        .polynomial
-        .fold(&query[0])
-        .map_err(|_| Error("source fold"))?;
+    let mut polynomial =
+        (pp.folder)(&source.polynomial, &query[0]).map_err(|_| Error("source fold"))?;
     for layer in 1..pp.rounds() {
-        let next = polynomial
-            .fold(&query[layer])
-            .map_err(|_| Error("intermediate fold"))?;
+        let next =
+            (pp.folder)(&polynomial, &query[layer]).map_err(|_| Error("intermediate fold"))?;
         layers.push(state::<F, H>(pp, layer, polynomial));
         polynomial = next;
     }
@@ -270,7 +340,7 @@ fn certificate_traced<F: Field + Serialize, H: Hash + Send + Sync>(
     }
     let roots: Vec<_> = states[1..].iter().map(|s| s.root()).collect();
     bind(t, pp, &states[0].root(), &roots, query, claim);
-    let indices: Vec<_> = (0..pp.queries).map(|_| sample(t, pp.len(0))).collect();
+    let indices = sample_indices(t, pp);
     let queries = indices
         .iter()
         .copied()
@@ -342,8 +412,11 @@ where
         t.append_message(b"packed PolyFRIM virtual source v2", &());
     }
     bind(t, pp, source, &proof.roots, query, claim);
-    for openings in &proof.queries {
-        let index = sample(t, pp.len(0));
+    // Complete the no-prover-message sampling phase before processing any
+    // openings or invoking virtual-source authentication. This matches the
+    // prover's order and preserves the accepted transcript byte for byte.
+    let indices = sample_indices(t, pp);
+    for (index, openings) in indices.into_iter().zip(&proof.queries) {
         for (layer, pair) in openings.iter().enumerate() {
             let position = (index >> layer) / 2;
             let depth = (pp.len(layer) / 2).ilog2() as usize;
@@ -404,10 +477,15 @@ fn bind<F: Field + Serialize, O: Serialize>(
         &(pp, source, roots, query, claim),
     );
 }
+#[cfg(test)]
 fn sample<F: Field>(t: &mut Transcript<F>, n: usize) -> usize {
     let mut bytes = [0u8; 8];
     t.get_challenge_bytes(b"packed PolyFRIM domain index v2", &mut bytes);
     (u64::from_le_bytes(bytes) & (n as u64 - 1)) as usize
+}
+fn sample_indices<F: Field + Serialize>(t: &mut Transcript<F>, pp: &Parameters<F>) -> Vec<usize> {
+    t.get_index_challenges(b"packed PolyFRIM domain index v2", pp.len(0), pp.queries)
+        .expect("trusted consistency sampling geometry")
 }
 fn hash<H: Hash, T: Serialize>(value: &T) -> H::Output {
     let mut h = H::new();
@@ -704,5 +782,287 @@ mod tests {
     #[test]
     fn goldilocks_fresh_false_transitions_with_valid_paths() {
         false_transition::<algebra::Goldilocks>();
+    }
+}
+
+#[cfg(test)]
+mod base_fold_tests {
+    use super::*;
+    use algebra::{
+        NTTField,
+        matrix_weighted::{Matrix, PackedTable},
+        transformation::AbstractNTT,
+    };
+    use sha2::Sha256;
+
+    fn reference<B, E>()
+    where
+        B: NTTField + Serialize,
+        E: AbstractExtensionField<B> + Serialize,
+    {
+        for width in [1, 2, 4, 8] {
+            let reference = Parameters::new(
+                16,
+                width,
+                2,
+                8,
+                E::from_base(B::generate_ntt_table(5).unwrap().root()),
+            )
+            .unwrap()
+            .with_base_field_encoder::<B>()
+            .unwrap();
+            let optimized = reference.clone().with_base_field_folds::<B>();
+            assert_eq!(
+                bincode::serde::encode_to_vec(&reference, bincode::config::standard()).unwrap(),
+                bincode::serde::encode_to_vec(&optimized, bincode::config::standard()).unwrap()
+            );
+            for mode in 0..4 {
+                let scalar = |i: usize, nonbase: bool| {
+                    E::from_base_fn(|j| {
+                        if j == 0 || nonbase {
+                            B::from(i * 17 + j * 31 + 1)
+                        } else {
+                            B::zero()
+                        }
+                    })
+                    .canonicalized()
+                };
+                let table = PackedTable::new(
+                    4,
+                    width,
+                    (0..16 * width).map(|i| scalar(i, mode & 2 != 0)).collect(),
+                )
+                .unwrap();
+                let source =
+                    commit::<E, Sha256>(&reference, Polynomial::from_table(&table).unwrap())
+                        .unwrap();
+                let queries: Vec<Vec<_>> = (0..16)
+                    .map(|member| {
+                        (0..4)
+                            .map(|round| MatrixPair {
+                                zero: Matrix::new(
+                                    width,
+                                    (0..width * width)
+                                        .map(|i| scalar(13 * member + round + i, mode & 1 != 0))
+                                        .collect(),
+                                )
+                                .unwrap(),
+                                one: Matrix::new(
+                                    width,
+                                    (0..width * width)
+                                        .map(|i| {
+                                            scalar(
+                                                7 * member + 3 * round + 2 * i + 5,
+                                                mode & 1 != 0,
+                                            )
+                                        })
+                                        .collect(),
+                                )
+                                .unwrap(),
+                            })
+                            .collect()
+                    })
+                    .collect();
+                // Independent direct three-product algebra remains the verifier
+                // reference; canonical committed words must be byte-identical.
+                let generic = source.polynomial.fold(&queries[0][0]).unwrap();
+                let fast = source.polynomial.fold_base::<B>(&queries[0][0]).unwrap();
+                assert_eq!(generic.coefficients, fast.coefficients);
+                for count in [1, 4, 16] {
+                    let claims: Vec<_> = queries[..count]
+                        .iter()
+                        .map(|q| {
+                            table
+                                .evaluate(q)
+                                .unwrap()
+                                .into_iter()
+                                .map(Field::canonicalized)
+                                .collect()
+                        })
+                        .collect();
+                    let mut a = Transcript::<E>::new_direct_extension::<B>();
+                    let mut b = Transcript::<E>::new_direct_extension::<B>();
+                    let before = proximity::batch::prove::<E, Sha256>(
+                        &mut a,
+                        &reference,
+                        &source,
+                        &queries[..count],
+                        &claims,
+                    )
+                    .unwrap();
+                    let after = proximity::batch::prove::<E, Sha256>(
+                        &mut b,
+                        &optimized,
+                        &source,
+                        &queries[..count],
+                        &claims,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        bincode::serde::encode_to_vec(&before, bincode::config::standard())
+                            .unwrap(),
+                        bincode::serde::encode_to_vec(&after, bincode::config::standard()).unwrap()
+                    );
+                    let mut v = Transcript::<E>::new_direct_extension::<B>();
+                    proximity::batch::verify::<E, Sha256>(
+                        &mut v,
+                        &optimized,
+                        &source.root(),
+                        &queries[..count],
+                        &claims,
+                        &after,
+                    )
+                    .unwrap();
+                    let mut x = [0; 32];
+                    let mut y = [0; 32];
+                    let mut z = [0; 32];
+                    a.get_challenge_bytes(b"base fold reference after", &mut x);
+                    b.get_challenge_bytes(b"base fold reference after", &mut y);
+                    v.get_challenge_bytes(b"base fold reference after", &mut z);
+                    assert_eq!(x, y);
+                    assert_eq!(x, z);
+                }
+            }
+        }
+    }
+    #[test]
+    fn babybear_base_folds_preserve_full_packets_and_fallback() {
+        reference::<algebra::BabyBear, algebra::BabyBearExtension6>();
+    }
+    #[test]
+    fn goldilocks_base_folds_preserve_full_packets_and_fallback() {
+        reference::<algebra::Goldilocks, algebra::GoldilocksExtension3>();
+    }
+
+    fn profile<B, E>()
+    where
+        B: NTTField,
+        E: AbstractExtensionField<B>,
+    {
+        let width = 8;
+        let table = PackedTable::new(
+            15,
+            width,
+            (0..(1 << 15) * width)
+                .map(|i| E::from_base(B::from(17 * i + 1)))
+                .collect(),
+        )
+        .unwrap();
+        let source = Polynomial::from_table(&table).unwrap();
+        let query = MatrixPair {
+            zero: Matrix::new(
+                width,
+                (0..width * width)
+                    .map(|i| E::from_base(B::from(13 * i + 1)))
+                    .collect(),
+            )
+            .unwrap(),
+            one: Matrix::new(
+                width,
+                (0..width * width)
+                    .map(|i| E::from_base(B::from(7 * i + 3)))
+                    .collect(),
+            )
+            .unwrap(),
+        };
+        for order in [false, true] {
+            for fast in if order { [true, false] } else { [false, true] } {
+                let start = std::time::Instant::now();
+                let folded = if fast {
+                    source.fold_base::<B>(&query)
+                } else {
+                    source.fold(&query)
+                }
+                .unwrap();
+                let elapsed = start.elapsed().as_secs_f64();
+                assert_eq!(
+                    folded.coefficients,
+                    source.fold(&query).unwrap().coefficients
+                );
+                println!(
+                    "HB_BASE_FOLD_KERNEL {{\"field\":\"{}\",\"fast\":{},\"order\":{},\"seconds\":{},\"variables\":15,\"width\":8,\"whole_pbs\":false}}",
+                    std::any::type_name::<E>(),
+                    fast,
+                    order,
+                    elapsed
+                );
+            }
+        }
+    }
+    #[test]
+    #[ignore = "manual fold arithmetic microbenchmark"]
+    fn base_fold_kernel_profile() {
+        profile::<algebra::BabyBear, algebra::BabyBearExtension6>();
+        profile::<algebra::Goldilocks, algebra::GoldilocksExtension3>();
+    }
+}
+
+#[cfg(test)]
+mod parallel_word_tests {
+    use super::*;
+    use algebra::{NTTField, matrix_weighted::PackedTable, transformation::AbstractNTT};
+    use sha2::Sha256;
+    fn compare<B, E>()
+    where
+        B: NTTField + Serialize,
+        E: AbstractExtensionField<B> + Serialize,
+    {
+        for width in [1, 2, 4, 8] {
+            for dense in [false, true] {
+                let pp = Parameters::new(
+                    4096,
+                    width,
+                    2,
+                    8,
+                    E::from_base(B::generate_ntt_table(13).unwrap().root()),
+                )
+                .unwrap()
+                .with_base_field_encoder::<B>()
+                .unwrap()
+                .with_parallel_oracles();
+                let table = PackedTable::new(
+                    12,
+                    width,
+                    (0..4096 * width)
+                        .map(|i| {
+                            E::from_base_fn(|j| {
+                                if j == 0 || dense {
+                                    B::from(17 * i + 31 * j + 1)
+                                } else {
+                                    B::zero()
+                                }
+                            })
+                        })
+                        .collect(),
+                )
+                .unwrap();
+                let polynomial = Polynomial::from_table(&table).unwrap();
+                let sequential = encode_values_sequential(&pp, 0, &polynomial);
+                let parallel = encode_values(&pp, 0, &polynomial);
+                assert_eq!(
+                    bincode::serde::encode_to_vec(&sequential, bincode::config::standard())
+                        .unwrap(),
+                    bincode::serde::encode_to_vec(&parallel, bincode::config::standard()).unwrap()
+                );
+                let source = commit::<E, Sha256>(&pp, polynomial).unwrap();
+                let leaves: Vec<_> = sequential
+                    .chunks_exact(2 * width)
+                    .enumerate()
+                    .map(|(i, v)| leaf::<E, Sha256>(&pp, 0, i, v))
+                    .collect();
+                let mut reference = MerkleTree::<Sha256>::new();
+                reference.generate(&leaves);
+                assert_eq!(reference.tree, source.tree.tree);
+                assert_eq!(reference.root, source.root());
+            }
+        }
+    }
+    #[test]
+    fn babybear_parallel_words_preserve_every_leaf_and_root() {
+        compare::<algebra::BabyBear, algebra::BabyBearExtension6>();
+    }
+    #[test]
+    fn goldilocks_parallel_words_preserve_every_leaf_and_root() {
+        compare::<algebra::Goldilocks, algebra::GoldilocksExtension3>();
     }
 }

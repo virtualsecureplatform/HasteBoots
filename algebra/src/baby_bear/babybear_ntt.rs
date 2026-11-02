@@ -1,9 +1,12 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use arc_swap::ArcSwap;
 use num_traits::{Zero, pow};
 
-use crate::{Field, NTTField, transformation::prime32::ConcreteTable};
+use crate::{
+    Field, NTTField,
+    transformation::{AbstractNTT, prime32::ConcreteTable},
+};
 
 use super::BabyBear;
 
@@ -18,6 +21,8 @@ impl From<usize> for BabyBear {
 type Table = <BabyBear as NTTField>::Table;
 #[allow(clippy::type_complexity)]
 static NTT_TABLE: OnceLock<ArcSwap<Vec<(u32, Arc<Table>)>>> = OnceLock::new();
+
+static NTT_ROOTS: OnceLock<Mutex<Vec<(u32, BabyBear)>>> = OnceLock::new();
 
 impl NTTField for BabyBear {
     type Table = ConcreteTable<Self>;
@@ -110,6 +115,31 @@ impl NTTField for BabyBear {
     #[inline]
     fn generate_ntt_table(log_n: u32) -> Result<Self::Table, crate::AlgebraError> {
         Self::Table::new(log_n)
+    }
+
+    fn get_ntt_root(log_n: u32) -> Result<Self, crate::AlgebraError> {
+        let mut roots = NTT_ROOTS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((_, root)) = roots.iter().find(|(bits, _)| *bits == log_n) {
+            return Ok(*root);
+        }
+        // Reuse a retained transform plan when available. Otherwise generate
+        // the exact native root once and drop the temporary plan.
+        let root = if let Some(table) = NTT_TABLE.get().and_then(|tables| {
+            tables
+                .load()
+                .iter()
+                .find(|(bits, _)| *bits == log_n)
+                .map(|(_, table)| Arc::clone(table))
+        }) {
+            table.root()
+        } else {
+            Self::generate_ntt_table(log_n)?.root()
+        };
+        roots.push((log_n, root));
+        Ok(root)
     }
 
     fn init_ntt_table(log_n: u32) -> Result<(), crate::AlgebraError> {

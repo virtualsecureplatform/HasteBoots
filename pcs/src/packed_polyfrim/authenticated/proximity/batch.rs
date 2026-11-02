@@ -5,6 +5,68 @@
 //! This non-hiding experimental kernel is not a concrete soundness, knowledge,
 //! Fiat–Shamir, masked-PCS or complete-PBS security certificate.
 use super::*;
+use std::{collections::HashMap, sync::Arc};
+
+pub(crate) mod base;
+
+// Prover-only memoization. Parent identity preserves the complete ordered
+// prefix without treating equal roots as evidence of equal private states.
+fn shared_ladders<F: Field + Serialize, H: Hash + Send + Sync>(
+    pp: &Parameters<F>,
+    sources: &[&State<F, H>],
+    queries: &[Vec<MatrixPair<F>>],
+    claims: &[Vec<F>],
+) -> Result<Vec<Vec<Arc<State<F, H>>>>, Error> {
+    let mut cache = HashMap::new();
+    let mut retained = 0usize;
+    let mut result = Vec::with_capacity(queries.len());
+    for ((source, query), claim) in sources.iter().zip(queries).zip(claims) {
+        if source.layer != 0
+            || source.context != hash::<H, _>(&(b"packed PolyFRIM parameters v2", pp))
+        {
+            return Err(Error("source parameter context"));
+        }
+        let mut layers: Vec<Arc<State<F, H>>> = Vec::with_capacity(pp.rounds() - 1);
+        for layer in 1..pp.rounds() {
+            let parent = layers.last().map(Arc::as_ref).unwrap_or(source);
+            let key = (
+                parent as *const State<F, H> as usize,
+                bincode::serde::encode_to_vec(&query[layer - 1], bincode::config::standard())
+                    .map_err(|_| Error("matrix prefix encoding"))?,
+            );
+            let next = if let Some(existing) = cache.get(&key) {
+                Arc::clone(existing)
+            } else {
+                let polynomial = (pp.folder)(&parent.polynomial, &query[layer - 1])
+                    .map_err(|_| Error("intermediate fold"))?;
+                let next = Arc::new(state::<F, H>(pp, layer, polynomial));
+                let bytes = (next.polynomial.len() * pp.width + next.values().len())
+                    .saturating_mul(std::mem::size_of::<F>())
+                    .saturating_add(
+                        next.tree
+                            .tree
+                            .len()
+                            .saturating_mul(std::mem::size_of::<H::Output>()),
+                    )
+                    .saturating_add(key.1.len());
+                if retained.saturating_add(bytes) <= 1usize << 30 {
+                    retained += bytes;
+                    cache.insert(key, Arc::clone(&next));
+                }
+                next
+            };
+            layers.push(next);
+        }
+        let parent = layers.last().map(Arc::as_ref).unwrap_or(source);
+        let terminal = (pp.folder)(&parent.polynomial, &query[pp.rounds() - 1])
+            .map_err(|_| Error("public fold"))?;
+        if terminal.evaluate(F::zero()) != *claim {
+            return Err(Error("false terminal claim"));
+        }
+        result.push(layers);
+    }
+    Ok(result)
+}
 
 /// Independent matrix consistency ladders with one joint projected rolling FRI.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -69,15 +131,35 @@ fn project<F: Field + Serialize, H: Hash>(
     roots: &[Vec<H::Output>],
 ) -> (Vec<Vec<Vec<F>>>, Vec<H::Output>) {
     t.append_message(b"packed PolyFRIM joint projections v1", &(pp, roots));
-    let weights: Vec<Vec<Vec<F>>> = (0..pp.rounds())
-        .map(|_| {
-            (0..roots.len())
-                .map(|_| {
-                    t.get_vec_challenge(b"packed PolyFRIM joint query lane weights v1", pp.width)
-                })
-                .collect()
-        })
-        .collect();
+    let weights: Vec<Vec<Vec<F>>> = if t.uses_atomic_joint_projections() {
+        let count = pp
+            .rounds()
+            .checked_mul(roots.len())
+            .and_then(|n| n.checked_mul(pp.width))
+            .expect("trusted joint projection geometry");
+        let flat = t.get_vec_challenge(b"packed PolyFRIM atomic joint lane weights v3", count);
+        let mut chunks = flat.chunks_exact(pp.width);
+        (0..pp.rounds())
+            .map(|_| {
+                (0..roots.len())
+                    .map(|_| chunks.next().expect("complete projection weights").to_vec())
+                    .collect()
+            })
+            .collect()
+    } else {
+        (0..pp.rounds())
+            .map(|_| {
+                (0..roots.len())
+                    .map(|_| {
+                        t.get_vec_challenge(
+                            b"packed PolyFRIM joint query lane weights v1",
+                            pp.width,
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    };
     let identifiers = weights
         .iter()
         .enumerate()
@@ -295,16 +377,15 @@ fn prove_sources_inner<F: Field + Serialize, H: Hash + Send + Sync>(
     if sources.len() != queries.len() {
         return Err(Error("joint proximity source count"));
     }
-    let layers = sources
-        .iter()
-        .zip(queries)
-        .zip(claims)
-        .map(|((source, q), c)| ladder(pp, source, q, c))
-        .collect::<Result<Vec<_>, _>>()?;
+    let layers = shared_ladders(pp, sources, queries, claims)?;
     let states: Vec<Vec<_>> = sources
         .iter()
         .zip(&layers)
-        .map(|(source, layers)| std::iter::once(*source).chain(layers.iter()).collect())
+        .map(|(source, layers)| {
+            std::iter::once(*source)
+                .chain(layers.iter().map(Arc::as_ref))
+                .collect()
+        })
         .collect();
     let roots: Vec<Vec<_>> = states
         .iter()
@@ -525,6 +606,61 @@ pub(in crate::packed_polyfrim::authenticated) fn verify_sources<
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn projection_phase_reference<B, E>()
+    where
+        B: NTTField + Serialize,
+        E: AbstractExtensionField<B> + Serialize,
+    {
+        let root = E::from_base(B::generate_ntt_table(6).unwrap().root());
+        let pp = Parameters::new(32, 2, 2, 8, root).unwrap();
+        let roots = vec![vec![[3u8; 32]; pp.rounds() + 1]; 3];
+        for version in [1, 2, 3] {
+            let parent = || match version {
+                1 => Transcript::<B>::new_classical(&[41; 64]),
+                2 => Transcript::<B>::new_classical_atomic_ntt(&[41; 64]),
+                _ => Transcript::<B>::new_classical_atomic_phases(&[41; 64]),
+            };
+            let mut p = parent();
+            let mut r = parent();
+            let mut actual = p
+                .fork_classical_extension::<B, E>(b"projection", b"context")
+                .unwrap();
+            let mut reference = r
+                .fork_classical_extension::<B, E>(b"projection", b"context")
+                .unwrap();
+            let (weights, _) = project::<E, Sha256>(&mut actual, &pp, &roots);
+            reference.append_message(b"packed PolyFRIM joint projections v1", &(&pp, &roots));
+            let expected: Vec<E> = if version == 3 {
+                reference.get_vec_challenge(
+                    b"packed PolyFRIM atomic joint lane weights v3",
+                    pp.rounds() * roots.len() * pp.width,
+                )
+            } else {
+                (0..pp.rounds() * roots.len())
+                    .flat_map(|_| {
+                        reference.get_vec_challenge(
+                            b"packed PolyFRIM joint query lane weights v1",
+                            pp.width,
+                        )
+                    })
+                    .collect()
+            };
+            assert_eq!(
+                weights.into_iter().flatten().flatten().collect::<Vec<_>>(),
+                expected
+            );
+            let mut a = [0; 64];
+            let mut b = [0; 64];
+            actual.get_challenge_bytes(b"after projection", &mut a);
+            reference.get_challenge_bytes(b"after projection", &mut b);
+            assert_eq!(a, b);
+        }
+    }
+    #[test]
+    fn atomic_projection_phases_match_reference_and_keep_old_schedules() {
+        projection_phase_reference::<algebra::BabyBear, algebra::BabyBearExtension6>();
+        projection_phase_reference::<algebra::Goldilocks, algebra::GoldilocksExtension3>();
+    }
     use algebra::{
         AbstractExtensionField, NTTField,
         matrix_weighted::{Matrix, PackedTable},
@@ -559,7 +695,7 @@ mod tests {
                 .unwrap();
         let mut coins = Transcript::<E>::new_direct_extension::<B>();
         for count in [1, 4, 16] {
-            let queries: Vec<Vec<_>> = (0..count)
+            let mut queries: Vec<Vec<_>> = (0..count)
                 .map(|_| {
                     (0..variables)
                         .map(|_| {
@@ -575,6 +711,13 @@ mod tests {
                         .collect()
                 })
                 .collect();
+            if count > 1 {
+                // Shared early folds, a divergent suffix, and an exact duplicate.
+                // The generated-source reference below builds each independently.
+                let prefix = queries[0][..2].to_vec();
+                queries[1][..2].clone_from_slice(&prefix);
+                queries[count - 1] = queries[0].clone();
+            }
             let claims: Vec<Vec<_>> = queries
                 .iter()
                 .map(|q| {
@@ -586,6 +729,16 @@ mod tests {
                         .collect()
                 })
                 .collect();
+            if count > 1 {
+                let shared =
+                    shared_ladders::<E, Sha256>(&pp, &vec![&source; count], &queries, &claims)
+                        .unwrap();
+                assert!(Arc::ptr_eq(&shared[0][0], &shared[1][0]));
+                assert!(Arc::ptr_eq(&shared[0][1], &shared[1][1]));
+                for (a, b) in shared[0].iter().zip(&shared[count - 1]) {
+                    assert!(Arc::ptr_eq(a, b));
+                }
+            }
             // The sequential source factory must preserve the previous retained
             // virtual-source proof, indices and full transcript byte for byte.
             let mut retained_t = Transcript::new_direct_extension::<B>();

@@ -6,9 +6,11 @@
 //! commits the random combined first oracle, authenticating its equality to the
 //! packed fragments by independent queries. It does not implement Protocol 3
 //! masking, virtual-oracle query reuse, packed matrix queries, or a concrete
-//! security certificate. It is not selected by the PBS prover.
+//! security certificate. It is not selected by the default PBS prover.
 /// Experimental padded/masked variant with virtual-oracle query reuse.
 pub mod masked;
+/// Versioned unmasked virtual-combination opening with shared authentication.
+pub mod virtual_source;
 
 use crate::{
     rolling_fri as fri,
@@ -358,13 +360,12 @@ fn bind<F: Field + Serialize, H: Hash>(
     Ok(t.get_challenge(b"PipFRI fragment batch"))
 }
 fn indices<F: Field + Serialize>(t: &mut Transcript<F>, pp: &Parameters<F>) -> Vec<usize> {
-    (0..pp.fri.queries())
-        .map(|_| {
-            let mut bytes = [0; 8];
-            t.get_challenge_bytes(b"PipFRI consistency domain index", &mut bytes);
-            (u64::from_le_bytes(bytes) & (pp.fri.encoded_len() as u64 - 1)) as usize
-        })
-        .collect()
+    t.get_index_challenges(
+        b"PipFRI consistency domain index",
+        pp.fri.encoded_len(),
+        pp.fri.queries(),
+    )
+    .expect("trusted fragmented sampling geometry")
 }
 fn pairs<F: Field>(values: &[Vec<F>], i: usize) -> Vec<[F; 2]> {
     values.iter().map(|v| [v[2 * i], v[2 * i + 1]]).collect()
@@ -433,6 +434,95 @@ mod tests {
     use algebra::{NTTField, transformation::AbstractNTT};
     use serde::de::DeserializeOwned;
     use sha2::Sha256;
+
+    #[test]
+    fn authentication_hash_counts_match_reference_and_virtual_modes() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static OUTPUTS: AtomicUsize = AtomicUsize::new(0);
+        #[derive(Clone, Debug, Default)]
+        struct Counted(sha2::Sha512);
+        impl Hash for Counted {
+            type Output = crate::utils::hash::Digest512;
+            fn update_hash_value(&mut self, input: &[u8]) {
+                Hash::update_hash_value(&mut self.0, input);
+            }
+            fn output_reset(&mut self) -> Self::Output {
+                OUTPUTS.fetch_add(1, Ordering::Relaxed);
+                Hash::output_reset(&mut self.0)
+            }
+        }
+        fn check<Base: NTTField, E: AbstractExtensionField<Base> + Serialize>() {
+            let native = Base::generate_ntt_table(5).unwrap().root();
+            for blowup in [2, 4, 8] {
+                for basis in [Basis::Coefficients, Basis::BooleanEvaluations] {
+                    let mut shift = native;
+                    let mut domain = 4 * blowup;
+                    while domain < 32 {
+                        shift *= shift;
+                        domain *= 2;
+                    }
+                    let root = E::from_base(shift);
+                    let pp = Parameters::new(4, 4, blowup, 3, root, basis).unwrap();
+                    let data: Vec<_> = (0..pp.table_len())
+                        .map(|i| E::from_base_fn(|j| Base::from(17 * i + 29 * j + 1)))
+                        .collect();
+                    let point = vec![E::from_base(Base::from(7usize)); pp.num_vars()];
+                    let value = tensor(&data, &point, basis);
+                    let source = commit::<E, Counted>(&pp, &data).unwrap();
+                    let expected = source.commitment();
+                    let proof = open::<E, Counted>(
+                        &mut Transcript::new_classical_extension::<Base>(&[77; 64]),
+                        &pp,
+                        &expected,
+                        &source,
+                        &point,
+                        value,
+                    )
+                    .unwrap();
+                    let (virtual_value, virtual_proof) = virtual_source::open_at::<E, Counted>(
+                        &mut Transcript::new_classical_extension::<Base>(&[77; 64]),
+                        &pp,
+                        &expected,
+                        &source,
+                        &point,
+                    )
+                    .unwrap();
+                    assert_eq!(virtual_value, value);
+                    let paths: Vec<_> = (0..pp.fri.rounds())
+                        .map(|i| pp.fri.len(i).ilog2() as usize)
+                        .collect();
+                    let mut transcript = Transcript::new_classical_extension::<Base>(&[77; 64]);
+                    OUTPUTS.store(0, Ordering::Relaxed);
+                    verify::<E, Counted>(&mut transcript, &pp, &expected, &point, value, &proof)
+                        .unwrap();
+                    // Authentication plus PipFRI binding (2) and rolling binding (1).
+                    let ordinary_auth = 3
+                        * (2 * paths.iter().sum::<usize>()
+                            + paths[1..].iter().sum::<usize>()
+                            + paths[0]
+                            + 2
+                            + pp.fri.rounds());
+                    assert_eq!(OUTPUTS.load(Ordering::Relaxed), ordinary_auth + 3);
+                    let mut transcript = Transcript::new_classical_extension::<Base>(&[77; 64]);
+                    OUTPUTS.store(0, Ordering::Relaxed);
+                    virtual_source::verify::<E, Counted>(
+                        &mut transcript,
+                        &pp,
+                        &expected,
+                        &point,
+                        value,
+                        &virtual_proof,
+                    )
+                    .unwrap();
+                    // Binding (2), virtual identifier including its contexts (3), rolling (1).
+                    let virtual_auth = 3 * (2 * paths[1..].iter().sum::<usize>() + paths[0] + 2);
+                    assert_eq!(OUTPUTS.load(Ordering::Relaxed), virtual_auth + 6);
+                }
+            }
+        }
+        check::<algebra::BabyBear, algebra::BabyBearExtension6>();
+        check::<algebra::Goldilocks, algebra::GoldilocksExtension3>();
+    }
 
     // Independent tensor contraction, rather than the prover's fold routine.
     fn tensor<F: Field>(data: &[F], point: &[F], basis: Basis) -> F {

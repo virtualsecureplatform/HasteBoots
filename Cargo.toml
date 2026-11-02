@@ -43,3 +43,8 @@ codegen-units = 1
 [profile.release]
 lto = true
 codegen-units = 1
+
+# Transcript audits recompute SHAKE over large captured prefixes. Keep their
+# debug builds practical without changing the release/benchmark profiles.
+[profile.dev.package.keccak]
+opt-level = 3

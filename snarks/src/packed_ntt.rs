@@ -378,12 +378,101 @@ where
     Ok(())
 }
 
+#[cfg(test)]
+pub(crate) fn audit_binding_row_points<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &Shape,
+    coefficients: &CanonicalVerifierOracle<'_, H::Output, P>,
+    evaluations: &CanonicalVerifierOracle<'_, H::Output, P>,
+) -> Result<Vec<Vec<F>>, Error>
+where
+    F: NTTField + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+{
+    bind::<F, H, P>(trans, shape, coefficients, evaluations)?;
+    Ok(row_points(trans, shape))
+}
+
+#[cfg(test)]
+pub(crate) fn audit_folded_compression<F: NTTField + Serialize>(
+    trans: &mut Transcript<F>,
+    shape: &Shape,
+    coefficients: &[Vec<F>],
+    evaluations: &[Vec<F>],
+) -> Result<Vec<MatrixPair<F>>, Error> {
+    trans.append_message(b"packed NTT folded polynomials", &(coefficients, evaluations));
+    check_folded::<F>(shape, coefficients, evaluations)?;
+    coefficient_query(trans, shape)
+}
+
 fn row_points<F: NTTField>(trans: &mut Transcript<F>, shape: &Shape) -> Vec<Vec<F>> {
+    if trans.uses_atomic_ntt_rows() {
+        let rows = shape.row_variables();
+        let count = shape
+            .width
+            .checked_mul(rows)
+            .expect("trusted NTT row geometry");
+        let values = trans.get_vec_challenge(b"packed NTT atomic row points v2", count);
+        return if rows == 0 {
+            vec![vec![]; shape.width]
+        } else {
+            values.chunks_exact(rows).map(<[F]>::to_vec).collect()
+        };
+    }
     (0..shape.width)
         .map(|_| {
             trans.get_vec_challenge(b"packed NTT independent row point", shape.row_variables())
         })
         .collect()
+}
+
+#[cfg(test)]
+mod atomic_row_tests {
+    use super::*;
+    fn check<F: NTTField + Serialize>() {
+        for vars in [2, 4] {
+            let shape = Shape::from_dimensions::<F>(vars, 8, 32).unwrap();
+            for atomic in [false, true] {
+                let make = || {
+                    if atomic {
+                        Transcript::<F>::new_classical_atomic_ntt(&[44; 64])
+                    } else {
+                        Transcript::<F>::new_classical(&[44; 64])
+                    }
+                };
+                let mut actual = make();
+                let mut expected = make();
+                let points = row_points(&mut actual, &shape);
+                let reference: Vec<F> = if atomic {
+                    expected.get_vec_challenge(
+                        b"packed NTT atomic row points v2",
+                        shape.width * shape.row_variables(),
+                    )
+                } else {
+                    (0..shape.width)
+                        .flat_map(|_| {
+                            expected.get_vec_challenge(
+                                b"packed NTT independent row point",
+                                shape.row_variables(),
+                            )
+                        })
+                        .collect()
+                };
+                assert_eq!(points.len(), shape.width);
+                assert_eq!(points.into_iter().flatten().collect::<Vec<_>>(), reference);
+                assert_eq!(
+                    actual.get_challenge(b"after rows"),
+                    expected.get_challenge(b"after rows")
+                );
+            }
+        }
+    }
+    #[test]
+    fn atomic_ntt_rows_match_one_phase_and_legacy_schedule() {
+        check::<algebra::BabyBear>();
+        check::<algebra::Goldilocks>();
+    }
 }
 
 fn tensor<F: NTTField>(point: &[F]) -> Vec<F> {
@@ -479,6 +568,41 @@ fn source_query<F: NTTField>(
         });
     }
     Ok(query)
+}
+
+#[cfg(test)]
+pub(crate) type AuditSourceObligations<F> = (Vec<Vec<MatrixPair<F>>>, Vec<Vec<F>>, Vec<Vec<F>>);
+
+#[cfg(all(test, feature = "transcript-audit"))]
+pub(crate) fn audit_verified_source_obligations<F, H, P>(
+    trans: &mut Transcript<F>,
+    shape: &Shape,
+    coefficients: &CanonicalVerifierOracle<'_, H::Output, P>,
+    evaluations: &CanonicalVerifierOracle<'_, H::Output, P>,
+    proof: &CanonicalProof<F, P::BatchProof>,
+) -> Result<AuditSourceObligations<F>, Error>
+where F: NTTField + Serialize, H: Hash + Send + Sync, P: CanonicalPcs<F, H>,
+{
+    let points = audit_binding_row_points::<F, H, P>(trans, shape, coefficients, evaluations)?;
+    let compression = audit_folded_compression(trans, shape, &proof.coefficients, &proof.evaluations)?;
+    let (queries, co, ev) = audit_source_obligations(shape, &compression, &points, &proof.coefficients, &proof.evaluations)?;
+    coefficients.parameters.verify_many(trans, coefficients.commitment, &queries, &co, &proof.coefficient_opening).map_err(convert)?;
+    evaluations.parameters.verify_many(trans, evaluations.commitment, &queries, &ev, &proof.evaluation_opening).map_err(convert)?;
+    Ok((queries, co, ev))
+}
+
+#[cfg(test)]
+pub(crate) fn audit_source_obligations<F: NTTField>(
+    shape: &Shape,
+    compression: &[MatrixPair<F>],
+    points: &[Vec<F>],
+    coefficients: &[Vec<F>],
+    evaluations: &[Vec<F>],
+) -> Result<AuditSourceObligations<F>, Error> {
+    let queries = points.iter().map(|p| source_query(shape, compression, p)).collect::<Result<_, _>>()?;
+    let co = coefficients.iter().map(|p| compressed_value(shape, p, compression)).collect::<Result<_, _>>()?;
+    let ev = evaluations.iter().map(|p| compressed_value(shape, p, compression)).collect::<Result<_, _>>()?;
+    Ok((queries, co, ev))
 }
 
 fn compressed_value<F: NTTField>(

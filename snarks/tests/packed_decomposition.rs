@@ -348,3 +348,73 @@ fn valid_comparison_for_another_borrow_root_cannot_bypass_canonicity() {
         .is_err()
     );
 }
+
+// Check the semantic link between canonical tuple constraints and the native
+// field decomposition used by blind rotation and final negative-a key switching.
+fn canonical_native_contract<F: NTTField>() {
+    use algebra::{Basis, Polynomial};
+    let p: u128 = F::MODULUS_VALUE.to_string().parse().unwrap();
+    for bits in [5u32, 8] {
+        let config = Config::new::<F>(bits, 1, 1).unwrap();
+        let count = config.num_digits::<F>().unwrap();
+        let radix = 1u128 << bits;
+        let space = 1u128 << (bits as usize * count);
+        let tables: Vec<_> = (0..count)
+            .map(|i| config.comparison_table::<F>(i).unwrap())
+            .collect();
+        for integer in [0, 1, p - 2, p - 1, p, p + 1, space - 1] {
+            let mut borrow = 0usize;
+            let mut reconstructed = F::zero();
+            let mut power = F::one();
+            for (i, table) in tables.iter().enumerate() {
+                let digit = ((integer >> (bits as usize * i)) & (radix - 1)) as usize;
+                let matching: Vec<_> = table
+                    .iter()
+                    .filter(|row| row[0] == F::from(digit) && row[1] == F::from(borrow))
+                    .collect();
+                assert_eq!(matching.len(), 1);
+                assert!(matching[0][2] == F::zero() || matching[0][2] == F::one());
+                borrow = usize::from(matching[0][2] == F::one());
+                reconstructed += F::from(digit) * power;
+                power *= F::from(radix as usize);
+            }
+            assert_eq!(reconstructed, F::from((integer % p) as usize));
+            assert_eq!(borrow == 0, integer < p);
+            // Thus field reconstruction alone also accepts noncanonical
+            // aliases p and p+1, while the actual transition tables reject them.
+        }
+        let mut inputs = Vec::new();
+        let mut integers = Vec::new();
+        for x in [0, 1, 2, radix - 1, radix, radix + 1, p - 2, p - 1] {
+            let value = F::from(x as usize);
+            inputs.extend([value, -value]);
+            integers.extend([x, if x == 0 { 0 } else { p - x }]);
+        }
+        let mut polynomial = Polynomial::new(inputs);
+        let basis = Basis::<F>::new(bits);
+        assert_eq!(basis.decompose_len(), count);
+        let mut digit = vec![F::zero(); integers.len()];
+        for i in 0..count {
+            polynomial.decompose_lsb_bits_inplace(basis, &mut digit);
+            for (&actual, &integer) in digit.iter().zip(&integers) {
+                let expected = (integer >> (bits as usize * i)) & (radix - 1);
+                assert_eq!(actual, F::from(expected as usize));
+            }
+        }
+        assert!(
+            polynomial
+                .as_slice()
+                .iter()
+                .all(|&value| value == F::zero())
+        );
+    }
+}
+
+#[test]
+fn babybear_canonical_native_contract() {
+    canonical_native_contract::<BabyBear>();
+}
+#[test]
+fn goldilocks_canonical_native_contract() {
+    canonical_native_contract::<Goldilocks>();
+}

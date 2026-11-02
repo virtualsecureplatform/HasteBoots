@@ -62,7 +62,7 @@ where
     }
     if width < EF::D
         || EF::D == 0
-        || pp.helper.width() != width
+        || (pp.helper.width() != width && pp.helper.width() != EF::D)
         || pp.helper.num_vars() != pp.coefficients.num_vars() + width.ilog2() as usize
         || key.roots.len() != cfg.digits::<F>()?
         || acc.len() != 2 * cfg.n

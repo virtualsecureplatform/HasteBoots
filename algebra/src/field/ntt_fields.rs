@@ -65,6 +65,13 @@ pub trait NTTField: PrimeField + FheField + From<usize> {
     /// Generate the ntt table of the ntt field with desired `log_n`.
     fn generate_ntt_table(log_n: u32) -> Result<Self::Table, crate::AlgebraError>;
 
+    /// Return exactly the root of the native negacyclic plan for `log_n`.
+    /// Implementations may cache only this field element, without retaining a
+    /// transform plan. The default preserves the native plan's domain errors.
+    fn get_ntt_root(log_n: u32) -> Result<Self, crate::AlgebraError> {
+        Ok(Self::generate_ntt_table(log_n)?.root())
+    }
+
     /// Get the ntt table of the ntt field with desired `log_n`.
     fn get_ntt_table(log_n: u32) -> Result<Arc<Self::Table>, crate::AlgebraError>;
 

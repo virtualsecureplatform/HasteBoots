@@ -696,6 +696,9 @@ impl<'de, F: Deserialize<'de> + Default + Copy, const D: usize> Deserialize<'de>
                         .next_element()?
                         .ok_or_else(|| serde::de::Error::invalid_length(i, &self))?;
                 }
+                if seq.next_element::<F>()?.is_some() {
+                    return Err(serde::de::Error::invalid_length(D + 1, &self));
+                }
                 Ok(BinomialExtensionField { value })
             }
         }
@@ -795,4 +798,47 @@ fn cubic_square<F: Field>(a: &[F], w: F) -> [F; 3] {
     let c2 = a[1] * a[1] + (a[0] * a[2]) + (a[0] * a[2]);
 
     [c0, c1, c2]
+}
+
+#[cfg(test)]
+mod wire_shape_tests {
+    use super::*;
+    use serde::de::DeserializeOwned;
+
+    fn exact_degree<F, E>()
+    where
+        F: Field + Serialize + DeserializeOwned,
+        E: AbstractExtensionField<F> + Serialize + DeserializeOwned,
+    {
+        let config = bincode::config::standard();
+        let canonical = bincode::serde::encode_to_vec(E::zero(), config).unwrap();
+        assert_eq!(
+            canonical,
+            bincode::serde::encode_to_vec(vec![F::zero(); E::D], config).unwrap()
+        );
+        let (decoded, used): (E, usize) =
+            bincode::serde::decode_from_slice(&canonical, config).unwrap();
+        assert_eq!(decoded, E::zero());
+        assert_eq!(used, canonical.len());
+        for length in [0, E::D - 1, E::D + 1, E::D + 2] {
+            let malformed = bincode::serde::encode_to_vec(vec![F::zero(); length], config).unwrap();
+            assert!(
+                bincode::serde::decode_from_slice::<E, _>(&malformed, config).is_err(),
+                "accepted {length} coefficients for degree {}",
+                E::D
+            );
+        }
+    }
+
+    #[test]
+    fn extension_wire_requires_exact_coefficient_count() {
+        exact_degree::<crate::BabyBear, crate::BabyBearExetension>();
+        exact_degree::<crate::BabyBear, crate::BabyBearExtension5>();
+        exact_degree::<crate::BabyBear, crate::BabyBearExtension6>();
+        exact_degree::<crate::BabyBear, crate::BabyBearExtension8>();
+        exact_degree::<crate::Goldilocks, crate::GoldilocksExtension>();
+        exact_degree::<crate::Goldilocks, crate::GoldilocksExtension3>();
+        exact_degree::<crate::Goldilocks, crate::GoldilocksExtension4>();
+        exact_degree::<crate::Goldilocks, crate::GoldilocksExtension5>();
+    }
 }

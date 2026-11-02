@@ -506,3 +506,101 @@ where
         self.verify_many::<H>(t, root, queries, values, proof)
     }
 }
+
+impl<F, EF, H> CanonicalPcs<F, H> for super::polyfrim::Parameters<F, EF>
+where
+    F: NTTField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+{
+    type State = super::polyfrim::State<F, EF, H>;
+    type BatchProof = super::polyfrim::Proof<EF, H::Output>;
+    type SingleProof = super::polyfrim::Proof<EF, H::Output>;
+    const LINEAR_DOMAIN: &'static [u8] = b"unmasked packed canonical linear relations v1";
+    const ACCUMULATOR_DOMAIN: &'static [u8] = b"unmasked packed accumulator canonical linkage v1";
+    const NTT_DOMAIN: &'static [u8] = b"unmasked packed tensor NTT v1";
+    const RELATION_DOMAIN: &'static [u8] = b"HasteBoots unmasked packed relation v1";
+    type Error = super::polyfrim::Error;
+    const REGISTRY_DOMAIN: &'static [u8] = b"unmasked packed opening registry v1";
+    const CLAIM_DOMAIN: &'static [u8] = b"unmasked packed opening claim v1";
+    const SEAL_DOMAIN: &'static [u8] = b"unmasked packed opening seal v1";
+    fn num_vars(&self) -> usize {
+        self.num_vars()
+    }
+    fn width(&self) -> usize {
+        self.width()
+    }
+    fn context(&self) -> Result<H::Output, Self::Error> {
+        Ok(self.context_digest::<H>())
+    }
+    fn normalize_claim(
+        &self,
+        query: Vec<MatrixPair<F>>,
+        values: Vec<F>,
+    ) -> Result<(Vec<MatrixPair<F>>, Vec<F>), Self::Error> {
+        let (mut queries, mut values) = self.claims(&[query], &[values])?;
+        Ok((queries.remove(0), values.remove(0)))
+    }
+    fn normalize_values(&self, values: Vec<F>) -> Vec<F> {
+        values.into_iter().map(|v| v.canonicalized()).collect()
+    }
+    fn validate_values(&self, values: &[F]) -> Result<(), Self::Error> {
+        if values.iter().any(|v| !v.is_canonical()) {
+            Err(super::polyfrim::Error(
+                "noncanonical public packed response",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+    fn open(
+        &self,
+        t: &mut Transcript<F>,
+        root: &Commitment<H::Output>,
+        state: &Self::State,
+        query: &[MatrixPair<F>],
+        value: &[F],
+    ) -> Result<Self::SingleProof, Self::Error> {
+        self.open_many::<H>(t, root, state, &[query.to_vec()], &[value.to_vec()])
+    }
+    fn verify(
+        &self,
+        t: &mut Transcript<F>,
+        root: &Commitment<H::Output>,
+        query: &[MatrixPair<F>],
+        value: &[F],
+        proof: &Self::SingleProof,
+    ) -> Result<(), Self::Error> {
+        self.verify_many::<H>(t, root, &[query.to_vec()], &[value.to_vec()], proof)
+    }
+    fn commit<R: Rng + CryptoRng>(
+        &self,
+        table: &PackedTable<F>,
+        _rng: &mut R,
+    ) -> Result<(Commitment<H::Output>, Self::State), Self::Error> {
+        self.commit::<H>(table)
+    }
+    fn table(state: &Self::State) -> &PackedTable<F> {
+        state.table()
+    }
+    fn open_many(
+        &self,
+        t: &mut Transcript<F>,
+        root: &Commitment<H::Output>,
+        state: &Self::State,
+        queries: &[Vec<MatrixPair<F>>],
+        values: &[Vec<F>],
+    ) -> Result<Self::BatchProof, Self::Error> {
+        self.open_many::<H>(t, root, state, queries, values)
+    }
+    fn verify_many(
+        &self,
+        t: &mut Transcript<F>,
+        root: &Commitment<H::Output>,
+        queries: &[Vec<MatrixPair<F>>],
+        values: &[Vec<F>],
+        proof: &Self::BatchProof,
+    ) -> Result<(), Self::Error> {
+        self.verify_many::<H>(t, root, queries, values, proof)
+    }
+}

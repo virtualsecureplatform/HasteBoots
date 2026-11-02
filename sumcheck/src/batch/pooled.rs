@@ -35,6 +35,25 @@ struct Equation<'a, F: Field> {
     num_variables: usize,
     max_multiplicands: usize,
 }
+#[inline]
+fn affine_pair<F: Field>(
+    table: &DenseMultilinearExtension<F>,
+    pair: usize,
+    a: F,
+    bias: F,
+) -> (F, F) {
+    let left = table.evaluations[2 * pair];
+    let difference = table.evaluations[2 * pair + 1] - left;
+    let (mut start, step) = if a == F::one() {
+        (left, difference)
+    } else {
+        (left * a, difference * a)
+    };
+    if bias != F::zero() {
+        start += bias;
+    }
+    (start, step)
+}
 fn message<F: Field>(
     p: &Equation<'_, F>,
     route: &[usize],
@@ -50,20 +69,32 @@ fn message<F: Field>(
         .map(|((coefficient, products), ops)| {
             let mut sum = vec![F::zero(); degree + 1];
             let mut product = vec![F::zero(); degree + 1];
+            let unit = *coefficient == F::one();
+            let negative_unit = *coefficient == -F::one();
+            let first_unit = !products.is_empty() && (unit || negative_unit);
+            let begin = usize::from(first_unit);
             for b in 0..pairs {
-                product.fill(*coefficient);
-                for (&j, &(a, bias)) in products.iter().zip(ops) {
-                    let table = tables[route[j]];
-                    let left = table.evaluations[2 * b];
-                    let difference = table.evaluations[2 * b + 1] - left;
-                    let (mut start, step) = if a == F::one() {
-                        (left, difference)
+                if first_unit {
+                    let (a, bias) = ops[0];
+                    let (mut start, step) = affine_pair(tables[route[products[0]]], b, a, bias);
+                    // Split the first factor out once, leaving the remaining hot
+                    // factor loop unchanged (no per-factor coefficient branch).
+                    if unit {
+                        for value in &mut product {
+                            *value = start;
+                            start += step;
+                        }
                     } else {
-                        (left * a, difference * a)
-                    };
-                    if bias != F::zero() {
-                        start += bias;
+                        for value in &mut product {
+                            *value = -start;
+                            start += step;
+                        }
                     }
+                } else {
+                    product.fill(*coefficient);
+                }
+                for (&j, &(a, bias)) in products[begin..].iter().zip(&ops[begin..]) {
+                    let (mut start, step) = affine_pair(tables[route[j]], b, a, bias);
                     for value in &mut product {
                         *value *= start;
                         start += step;
@@ -221,8 +252,37 @@ mod tests {
                             ],
                             E::from_base(B::from(i + 1)),
                         );
+                        // General extension coefficients and zero terms also
+                        // exercise the conservative wire-preserving arithmetic.
+                        p.add_product(
+                            [h.clone(), own.clone(), h.clone()],
+                            E::from_base_fn(|c| B::from(i + c + 2)),
+                        );
+                        p.add_product([own.clone()], E::zero());
                         if i % 3 == 0 {
                             p.add_product([h.clone()], E::one());
+                            p.add_product([h.clone()], -E::one());
+                        }
+                        if i % 2 == 0 {
+                            p.add_product_with_linear_op(
+                                [h.clone(), own.clone(), h.clone()],
+                                &[
+                                    (E::one(), E::one()),
+                                    (-E::one(), E::zero()),
+                                    (E::from_base(B::from(2)), E::from_base(B::from(3))),
+                                ],
+                                -E::one(),
+                            );
+                            p.add_product_with_linear_op(
+                                [h.clone(), own.clone(), h.clone(), own.clone()],
+                                &[
+                                    (E::one(), E::zero()),
+                                    (E::one(), E::from_base(B::from(2))),
+                                    (E::one(), E::zero()),
+                                    (E::one(), E::zero()),
+                                ],
+                                E::one(),
+                            );
                         }
                         p
                     })

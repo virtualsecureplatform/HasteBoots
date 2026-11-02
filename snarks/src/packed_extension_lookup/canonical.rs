@@ -64,16 +64,33 @@ where
     P: CanonicalPcs<F, H>,
     R: Rng + CryptoRng,
 {
-    let witness: Vec<_> = sources.iter().map(|s| s.table()).collect();
-    prove_inner::<F, EF, H, P, R, true>(
+    prove_with_statistics::<F, EF, H, P, R>(
         parent,
         config,
         helper,
         sources,
-        &witness,
-        &mut ProverStatistics::default(),
+        &mut crate::packed_extension_lookup::ProverStatistics::default(),
         rng,
     )
+}
+/// Prove with lookup phase counters; counters never enter the transcript.
+pub fn prove_with_statistics<F, EF, H, P, R>(
+    parent: &mut Transcript<F>,
+    config: &Config<F>,
+    helper: &P,
+    sources: &[&CanonicalProverOracle<'_, F, H, P>],
+    statistics: &mut crate::packed_extension_lookup::ProverStatistics,
+    rng: &mut R,
+) -> Result<Proof<F, EF, H::Output, P::BatchProof>, Error>
+where
+    F: PrimeField + Serialize,
+    EF: AbstractExtensionField<F> + Serialize,
+    H: Hash + Send + Sync,
+    P: CanonicalPcs<F, H>,
+    R: Rng + CryptoRng,
+{
+    let witness: Vec<_> = sources.iter().map(|s| s.table()).collect();
+    prove_inner::<F, EF, H, P, R, true>(parent, config, helper, sources, &witness, statistics, rng)
 }
 fn prove_inner<F, EF, H, P, R, const STRICT: bool>(
     parent: &mut Transcript<F>,
@@ -153,7 +170,7 @@ where
         .collect();
     let tables = helper_values
         .iter()
-        .map(|v| bridge::table::<F, EF>(n, k, v).map_err(convert))
+        .map(|v| bridge::table::<F, EF>(n, helper.width(), v).map_err(convert))
         .collect::<Result<Vec<_>, _>>()?;
     statistics.preparation += timer.elapsed();
     let timer = std::time::Instant::now();
@@ -294,8 +311,10 @@ where
     let timer = std::time::Instant::now();
     let mut completed = Vec::with_capacity(groups.len());
     for (i, (group, a)) in groups.into_iter().zip(&algebra).enumerate() {
-        let q0 = bridge::coefficients_query::<F, EF>(k, &a.sum_point).map_err(convert)?;
-        let q1 = bridge::coefficients_query::<F, EF>(k, &a.zero_point).map_err(convert)?;
+        let q0 =
+            bridge::coefficients_query::<F, EF>(helper.width(), &a.sum_point).map_err(convert)?;
+        let q1 =
+            bridge::coefficients_query::<F, EF>(helper.width(), &a.zero_point).map_err(convert)?;
         let opening = helper
             .open_many(
                 parent,
@@ -303,8 +322,9 @@ where
                 &states[i],
                 &[q0.query, q1.query],
                 &[
-                    bridge::vector::<F, EF>(k, a.sum_value).map_err(convert)?,
-                    bridge::vector::<F, EF>(k, group.reciprocal_value).map_err(convert)?,
+                    bridge::vector::<F, EF>(helper.width(), a.sum_value).map_err(convert)?,
+                    bridge::vector::<F, EF>(helper.width(), group.reciprocal_value)
+                        .map_err(convert)?,
                 ],
             )
             .map_err(convert)?;
@@ -462,16 +482,19 @@ where
     }
     finish_child(parent, &mut child);
     for (i, (group, a)) in proof.groups.iter().zip(&algebra).enumerate() {
-        let q0 = bridge::coefficients_query::<F, EF>(k, &a.sum_point).map_err(convert)?;
-        let q1 = bridge::coefficients_query::<F, EF>(k, &a.zero_point).map_err(convert)?;
+        let q0 =
+            bridge::coefficients_query::<F, EF>(helper.width(), &a.sum_point).map_err(convert)?;
+        let q1 =
+            bridge::coefficients_query::<F, EF>(helper.width(), &a.zero_point).map_err(convert)?;
         helper
             .verify_many(
                 parent,
                 &proof.reciprocal_commitments[i],
                 &[q0.query, q1.query],
                 &[
-                    bridge::vector::<F, EF>(k, a.sum_value).map_err(convert)?,
-                    bridge::vector::<F, EF>(k, group.reciprocal_value).map_err(convert)?,
+                    bridge::vector::<F, EF>(helper.width(), a.sum_value).map_err(convert)?,
+                    bridge::vector::<F, EF>(helper.width(), group.reciprocal_value)
+                        .map_err(convert)?,
                 ],
                 &group.reciprocal_opening,
             )
@@ -524,7 +547,7 @@ where
         .ok_or_else(|| error("helper domain overflow"))?;
     if n == 0
         || helper.num_vars() != n
-        || helper.width() != k
+        || (helper.width() != k && helper.width() != EF::D)
         || config.logical_len() > capacity
         || sources
             .iter()

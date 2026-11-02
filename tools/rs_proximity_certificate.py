@@ -146,25 +146,35 @@ def _trim(coefficients):
     return coefficients
 
 
-def certificate(rows, points, message, radius, p):
+def certificate(rows, points, message, radius, p, *, curve=False):
     """Construct a nonzero exceptional-challenge polynomial for a far matrix.
 
-    On every challenge whose linear combination is radius-close to RS, the
-    polynomial vanishes. Dimensions are bounded so the audit cannot be mistaken
-    for an efficient native-size implementation.
+    On every challenge whose combination is radius-close to RS, the polynomial
+    vanishes. With curve=True the weights are 1,T,...,T^(row_count-1),
+    and the matrix/minors are constructed afresh over the univariate ring.
+    Substituting into an arbitrary multivariate certificate is not sufficient.
+    Dimensions are bounded; this is not a native-size implementation.
     """
-    n, variables = len(points), len(rows)
-    if (not 1 <= variables <= 3 or any(len(row) != n for row in rows) or n > 7 or
+    n, row_count = len(points), len(rows)
+    if (type(curve) is not bool or not 1 <= row_count <= (8 if curve else 3) or any(len(row) != n for row in rows) or n > 7 or
             any(type(x) is not int for x in (p, message, radius)) or
             not 3 <= p <= 257 or any(p % d == 0 for d in range(2, int(p**.5)+1)) or
             len(set(x % p for x in points)) != n or not 1 <= message <= n or
             not 0 <= radius or n < message+2*radius):
         raise ValueError("unsupported audit field, dimensions or decoding radius")
+    variables = 1 if curve else row_count
+    bound = (row_count-1 if curve else 1)*n*(n+1)
     zero = Polynomial.constant(p, variables, 0)
     if common_source(rows, points, message, radius, p) is not None:
         return None
-    indeterminates = [Polynomial.variable(p, variables, i) for i in range(variables)]
-    words = [sum((indeterminates[i]*rows[i][j] for i in range(variables)), zero) for j in range(n)]
+    if curve:
+        parameter = Polynomial.variable(p, 1, 0)
+        weights = [zero+1]
+        for _ in range(1, row_count):
+            weights.append(weights[-1]*parameter)
+    else:
+        weights = [Polynomial.variable(p, variables, i) for i in range(row_count)]
+    words = [sum((weights[i]*rows[i][j] for i in range(row_count)), zero) for j in range(n)]
     # Unknowns are E_0..E_radius and Q_0..Q_(message+radius-1).
     matrix = [[-word*pow(point, j, p) for j in range(radius+1)] +
               [zero+pow(point, j, p) for j in range(message+radius)]
@@ -184,7 +194,7 @@ def certificate(rows, points, message, radius, p):
             break
     rank, rr, cc, minor = pivot
     if rank == columns:
-        return dict(kind="rank", polynomial=minor, bound=n*(n+1), rank=rank)
+        return dict(kind="rank", polynomial=minor, bound=bound, rank=rank)
     free = next(j for j in range(columns) if j not in cc)
     selected = list(cc)+[free]
     kernel = [zero]*columns
@@ -213,25 +223,27 @@ def certificate(rows, points, message, radius, p):
         assert remainder, "generic divisibility would yield a common decoded source"
         exceptional = locator[-1]*next(c for c in remainder if c)
         kind = "division-remainder"
-    assert exceptional and exceptional.degree() <= n*(n+1)
-    return dict(kind=kind, polynomial=exceptional, bound=n*(n+1), rank=rank)
+    assert exceptional and exceptional.degree() <= bound
+    return dict(kind=kind, polynomial=exceptional, bound=bound, rank=rank)
 
 
-def exhaustive_check(rows, points, message, radius, p):
+def exhaustive_check(rows, points, message, radius, p, *, curve=False):
     """Enumerate a tiny challenge space and check the certificate pointwise."""
-    if p**len(rows) > 1000000:
+    variables = 1 if curve else len(rows)
+    if p**variables > 1000000:
         raise ValueError("audit challenge space too large")
-    cert = certificate(rows, points, message, radius, p)
+    cert = certificate(rows, points, message, radius, p, curve=curve)
     if cert is None:
         return dict(common_source=True)
     near = 0
-    for alpha in product(range(p), repeat=len(rows)):
-        word = [sum(a*row[j] for a, row in zip(alpha, rows)) % p for j in range(len(points))]
+    for alpha in product(range(p), repeat=variables):
+        weights = [pow(alpha[0], i, p) for i in range(len(rows))] if curve else alpha
+        word = [sum(a*row[j] for a, row in zip(weights, rows)) % p for j in range(len(points))]
         if near_word(word, points, message, radius, p):
             near += 1
             if cert["polynomial"].evaluate(alpha) != 0:
                 raise AssertionError(("certificate misses a close combination", alpha))
-    total = p**len(rows)
+    total = p**variables
     degree = cert["polynomial"].degree()
     assert near*p <= degree*total
     return dict(common_source=False, kind=cert["kind"], degree=degree,
